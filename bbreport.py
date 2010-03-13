@@ -177,6 +177,9 @@ def main():
             print build.result
             builder.builds[buildnum] = build
 
+    return builders
+
 
 if __name__ == '__main__':
-    main()
+    # set the builders var -- useful with python -i
+    builders = main()
