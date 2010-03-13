@@ -18,7 +18,7 @@ class Builder(object):
         self.name = name
         # the branch name should always be the last part of the name
         self.branch = name.split()[-1]
-        self.url = urllib.quote(baseurl + 'builders/' + name)
+        self.url = baseurl + 'builders/' + urllib.quote(name)
         self.builds = {}
         self.lastbuild = 0
 
