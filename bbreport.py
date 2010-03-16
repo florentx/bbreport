@@ -162,7 +162,7 @@ class Build(object):
             failed_tests = match.group(2).strip()
             self._message = ''
             self.failed_tests = failed_tests.split()
-            # assert len(self.failed_tests) == count_tests:
+            assert len(self.failed_tests) == count_tests
             return
 
         match = (RE_STOP.search(stdio) or
@@ -337,13 +337,14 @@ def main():
     else:
         selected_builders = builders
 
+    print 'Selected builders:', len(selected_builders), '/', len(builders)
+
     if options.quiet > 1:
         numbuilds = 2
         groups = dict((s, []) for s in BUILDER_STATUSES)
+        print "... retrieving last build results"
     else:
         numbuilds = NUMBUILDS
-
-    print 'Selected builders:', len(selected_builders), '/', len(builders)
 
     counters = dict((s, 0) for s in BUILDER_STATUSES)
 
