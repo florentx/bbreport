@@ -46,7 +46,7 @@ _colors = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
            S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'black'}
 
 
-def cformat(text, color='black'):
+def cformat(text, color):
     return '\x1b[%sm%s\x1b[39;49;00m' % (_shell_colors[color], text)
 
 
@@ -245,7 +245,7 @@ def print_builder(name, results, quiet):
         rev, get_msg, color = long[0]
         msg = get_msg()
         if len(msg) > MSG_MAXLENGTH:
-            msg = msg[:MSG_MAXLENGTH-3] + '...'
+            msg = msg[:MSG_MAXLENGTH - 3] + '...'
         print '- ' + cformat(msg, color)
     else:
         print
@@ -274,6 +274,7 @@ def print_status(groups):
             print cformat(status.title() + ':', _colors[status])
             for line in lines:
                 print '\t' + cformat(line, _colors[status])
+
 
 def print_final(counts):
     totals = []
@@ -354,7 +355,8 @@ def main():
         lastbuilds = proxy.getLastBuilds(str(builder), numbuilds)
 
         # Complete the list with tuples like (builder_name, -1).
-        builds = [(str(builder), -i-1) for i in range(numbuilds - len(lastbuilds))]
+        builds = [(str(builder), -1 - i)
+                  for i in range(numbuilds - len(lastbuilds))]
         builds += reversed(lastbuilds)
 
         results = []
@@ -364,13 +366,12 @@ def main():
             if options.failures:
                 # Parse the stdio logs
                 build.get_message()
-                # Note: failed_tests is not complete
                 if not set(options.failures) <= set(build.failed_tests):
                     continue
 
-            # These data are accumulated in a list and there's a sample 'reporter'
-            # object able to print them out. It may be used to generate other kind
-            # of reports (e.g. HTML, XML, ...)
+            # These data are accumulated in a list of results which is
+            # passed to a printer function.  The same list may be used
+            # to generate other kind of reports (e.g. HTML, XML, ...).
 
             results.append((build.revision, build.result, build.get_message))
             builder.builds[build.num] = build
