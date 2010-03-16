@@ -35,6 +35,9 @@ RE_TIMEOUT = re.compile('command timed out: ([^,]+)')
 RE_STOP = re.compile('(process killed by .+)')
 RE_BBTEST = re.compile('make: \*\*\* \[buildbottest\] (.+)')
 
+# HTML pollution in the stdio log
+HTMLNOISE = '</span><span class="stdout">'
+
 # Colored output
 _shell_colors = {'black':   '30;01',
                  'red':     '31;01',
@@ -156,6 +159,7 @@ class Build(object):
 
     def _parse_stdio(self):
         stdio = urlread(self.url + '/steps/test/logs/stdio')
+        stdio = stdio.replace(HTMLNOISE, '')
         match = RE_FAILED.search(stdio)
         if match:
             count_tests = int(match.group(1))
