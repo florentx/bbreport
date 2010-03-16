@@ -260,20 +260,16 @@ def print_builder(name, results, quiet):
 def print_status(groups):
     for status in BUILDER_STATUSES:
         names = groups[status]
-        if names:
-            lines = []
-            nlines = (len(names) + 2) // 3
-            for i, name in enumerate(names):
-                col, row = divmod(i, nlines)
-                s = '%-26s' % name
-                if col > 0:
-                    lines[row] += s
-                else:
-                    lines.append(s)
+        if not names:
+            continue
+        platforms = {}
+        for name in names:
+            host, branch = name.rsplit(None, 1)
+            platforms.setdefault(host, []).append(branch)
 
-            print cformat(status.title() + ':', _colors[status])
-            for line in lines:
-                print '\t' + cformat(line, _colors[status])
+        print cformat(status.title() + ':', _colors[status])
+        for host, branches in sorted(platforms.items()):
+            print '\t' + cformat(host, _colors[status]), ', '.join(branches)
 
 
 def print_final(counts):
