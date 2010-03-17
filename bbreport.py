@@ -31,6 +31,7 @@ RE_BUILD = re.compile('Build #(\d+)</h1>\r?\n?'
                       '<span class="([^"]+)">')
 RE_BUILD_REVISION = re.compile('<li>Revision: (\d+)</li>')
 RE_FAILED = re.compile('(\d+) tests? failed:((?:\r?\n? +([^\r\n]+))+)')
+RE_DISKFULL = re.compile('write failed, (filesystem is full)')
 RE_TIMEOUT = re.compile('command timed out: ([^,]+)')
 RE_STOP = re.compile('(process killed by .+)')
 RE_BBTEST = re.compile('make: \*\*\* \[buildbottest\] (.+)')
@@ -160,20 +161,31 @@ class Build(object):
     def _parse_stdio(self):
         stdio = urlread(self.url + '/steps/test/logs/stdio')
         stdio = stdio.replace(HTMLNOISE, '')
-        match = RE_FAILED.search(stdio)
-        if match:
-            count_tests = int(match.group(1))
-            failed_tests = match.group(2).strip()
+
+        # Check if disk full
+        full = RE_DISKFULL.search(stdio)
+        if full:
+            self._message = full.group(1)
+        else:
             self._message = ''
+
+        # Check if some test failed
+        fail = RE_FAILED.search(stdio)
+        if fail:
+            count_tests = int(fail.group(1))
+            failed_tests = fail.group(2).strip()
             self.failed_tests = failed_tests.split()
             assert len(self.failed_tests) == count_tests
+
+        if fail or full:
+            # If something is found, stop here
             return
 
         match = (RE_BBTEST.search(stdio) or
                  RE_TIMEOUT.search(stdio) or
                  RE_STOP.search(stdio))
         if match:
-            self._message = match.group(1).strip()
+            self._message = match.group(1).strip().lower()
         else:
             self._message = self.result + ': something crashed'
 
@@ -184,11 +196,14 @@ class Build(object):
         else:
             if self._message is None or 'test' in self._message:
                 self._parse_stdio()
+            msg = self._message
             if self.failed_tests:
-                msg = '%s failed: %s' % (len(self.failed_tests),
-                                         ' '.join(self.failed_tests))
-            else:
-                msg = self._message
+                if msg:
+                    # Disk full or some other error
+                    msg += ' (%s failed)' % len(self.failed_tests)
+                else:
+                    msg = '%s failed: %s' % (len(self.failed_tests),
+                                             ' '.join(self.failed_tests))
         return msg
 
     def asdict(self):
@@ -207,7 +222,8 @@ def print_builder(name, results, quiet):
 
     for rev, result, get_msg in results:
         if result == S_BUILDING:
-            short.append(cformat(' *** ', _colors[result]))
+            s = ' *** ' if len(short) < 2 else '***'
+            short.append(cformat(s, _colors[result]))
             continue
 
         shortrev = '%5d' % rev
