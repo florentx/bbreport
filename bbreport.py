@@ -341,30 +341,33 @@ def main():
 
     # create the list of builders
     names = proxy.getAllBuilders()
+
+    # sort by branch and name
     builders = sorted((Builder(name) for name in names),
-                      key=lambda b: (b.branch, b.name))
+                      key=lambda b: (b.branch, str(b)))
 
     if options.branches:
         branches = options.branches.split(',')
     else:
         branches = args
 
-    # filter the builders according to the options
-    if options.name:
-        #names = options.name.split(',')
-        pattern = fnmatch.translate(options.name)
-        selected_builders = [builder for builder in builders
-                             if re.match(pattern, builder.name, re.I)]
-
-    elif branches:
+    if branches:
+        # filter by branch
         selected_builders = [builder for builder in builders
                              if builder.branch in branches]
     else:
         selected_builders = builders
 
+    if options.name:
+        # filter by name
+        pattern = fnmatch.translate(options.name)
+        selected_builders = [builder for builder in selected_builders
+                             if re.match(pattern, builder.name, re.I)]
+
     print 'Selected builders:', len(selected_builders), '/', len(builders)
 
     if options.quiet > 1:
+        # For the "-qq" option, 2 builds per builder is enough
         numbuilds = 2
         groups = dict((s, []) for s in BUILDER_STATUSES)
         print "... retrieving last build results"
@@ -375,20 +378,20 @@ def main():
 
     # loop through the builders and their builds
     for builder in selected_builders:
-        # If the builder is working, the list is partial or empty.
-        lastbuilds = proxy.getLastBuilds(str(builder), numbuilds)
+        # If the builder is working, the list may be partial or empty.
+        xmlrpcbuilds = proxy.getLastBuilds(str(builder), numbuilds)
 
-        # Complete the list with tuples like (builder_name, -1).
-        builds = [(str(builder), -1 - i)
-                  for i in range(numbuilds - len(lastbuilds))]
-        builds += reversed(lastbuilds)
+        # Fill the list with tuples like (builder_name, -1).
+        lastbuilds = [(str(builder), -1 - i)
+                  for i in range(numbuilds - len(xmlrpcbuilds))]
+        lastbuilds += reversed(xmlrpcbuilds)
 
-        results = []
-        for lbuild in builds:
-            build = Build(*lbuild)
+        builds = []
+        for build_info in lastbuilds:
+            build = Build(*build_info)
 
             if options.failures:
-                # Parse the stdio logs
+                # Retrieve the failed tests
                 build.get_message()
                 if not set(options.failures) <= set(build.failed_tests):
                     continue
@@ -397,15 +400,16 @@ def main():
             # passed to a printer function.  The same list may be used
             # to generate other kind of reports (e.g. HTML, XML, ...).
 
-            results.append(build)
+            builds.append(build)
             builder.builds[build.num] = build
 
-        builder_status = print_builder(str(builder), results,
+        builder_status = print_builder(str(builder), builds,
                                        quiet=options.quiet)
-        counters[builder_status] += 1
 
         if options.quiet > 1:
             groups[builder_status].append(str(builder))
+
+        counters[builder_status] += 1
 
     if options.quiet > 1:
         print_status(groups)
