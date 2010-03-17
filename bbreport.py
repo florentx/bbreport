@@ -49,6 +49,10 @@ _shell_colors = {'black':   '30;01',
 _colors = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
            S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'black'}
 
+for status, color in _colors.items():
+    _shell_colors[status] = _shell_colors[color]
+del _colors
+
 
 def cformat(text, color):
     return '\x1b[%sm%s\x1b[39;49;00m' % (_shell_colors[color], text)
@@ -223,19 +227,19 @@ def print_builder(name, builds, quiet):
         result = build.result
         if result == S_BUILDING:
             s = ' *** ' if len(short) < 2 else '***'
-            short.append(cformat(s, _colors[result]))
+            short.append(cformat(s, result))
             continue
 
         shortrev = '%5d' % build.revision
         if len(short) > 1:
             shortrev = shortrev[-3:]
-        short.append(cformat(shortrev, _colors[result]))
+        short.append(cformat(shortrev, result))
 
         if result == S_SUCCESS:
             count[S_SUCCESS] += 1
         else:
             count[S_FAILURE] += 1
-            long.append((build.revision, build.get_message, _colors[result]))
+            long.append((build.revision, build.get_message, result))
 
     if quiet > 1:
         # Print only the colored buildbot names
@@ -249,7 +253,7 @@ def print_builder(name, builds, quiet):
     if count[S_SUCCESS] == 0:
         if count[S_FAILURE] == 0:
             builder_status = S_OFFLINE
-            short = [cformat(' *** ', _colors[S_OFFLINE])] * 2
+            short = [cformat(' *** ', S_OFFLINE)] * 2
         else:
             builder_status = S_FAILURE
     elif count[S_FAILURE] > 0:
@@ -257,8 +261,7 @@ def print_builder(name, builds, quiet):
     else:
         builder_status = S_SUCCESS
 
-    builder_color = _colors[builder_status]
-    print cformat('%-26s' % name, builder_color), ', '.join(short),
+    print cformat('%-26s' % name, builder_status), ', '.join(short),
 
     if quiet and long:
         # Print last failure or error.
@@ -288,16 +291,16 @@ def print_status(groups):
             host, branch = name.rsplit(None, 1)
             platforms.setdefault(host, []).append(branch)
 
-        print cformat(status.title() + ':', _colors[status])
+        print cformat(status.title() + ':', status)
         for host, branches in sorted(platforms.items()):
-            print '\t' + cformat(host, _colors[status]), ', '.join(branches)
+            print '\t' + cformat(host, status), ', '.join(branches)
 
 
 def print_final(counts):
     totals = []
     for status in BUILDER_STATUSES:
         if counts[status]:
-            totals.append(cformat(counts[status], _colors[status]))
+            totals.append(cformat(counts[status], status))
     print 'Totals:',
     print ' + '.join(totals)
 
