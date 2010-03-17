@@ -117,11 +117,13 @@ class Build(object):
             # Use the XMLRPC response
             assert len(args) == 7
             revision, result = args[3:5]
-            self.revision = int(revision or buildnum)
-            self.result = result
             if result in (S_EXCEPTION, S_FAILURE):
+                # Store the failure details
                 self._message = ' '.join(args[5])
-            if not revision:
+            if revision:
+                self.result = result
+                self.revision = int(revision)
+            else:
                 # Some buildbots hide the revision
                 self.result = self._parse_build()
         else:
