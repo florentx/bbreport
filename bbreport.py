@@ -169,6 +169,7 @@ class Build(object):
         # Check if disk full
         full = RE_DISKFULL.search(stdio)
         if full:
+            self.result = S_EXCEPTION
             self._message = full.group(1)
         else:
             self._message = ''
@@ -221,7 +222,7 @@ def print_builder(name, builds, quiet):
 
     count = {S_SUCCESS: 0, S_FAILURE: 0}
     short = []
-    long = []
+    failed_builds = []
 
     for build in builds:
         result = build.result
@@ -239,7 +240,7 @@ def print_builder(name, builds, quiet):
             count[S_SUCCESS] += 1
         else:
             count[S_FAILURE] += 1
-            long.append((build.revision, build.get_message, result))
+            failed_builds.append(build)
 
     if quiet > 1:
         # Print only the colored buildbot names
@@ -263,20 +264,21 @@ def print_builder(name, builds, quiet):
 
     print cformat('%-26s' % name, builder_status), ', '.join(short),
 
-    if quiet and long:
+    if quiet and failed_builds:
         # Print last failure or error.
-        rev, get_msg, color = long[0]
-        msg = get_msg()
+        build = failed_builds[0]
+        msg = build.get_message()
         if len(msg) > MSG_MAXLENGTH:
             msg = msg[:MSG_MAXLENGTH - 3] + '...'
-        print '- ' + cformat(msg, color)
+        print '- ' + cformat(msg, build.result)
     else:
         # Move to next line
         print
 
     if not quiet:
-        for rev, get_msg, color in long:
-            print ' %5d:' % rev, cformat(get_msg(), color)
+        for build in failed_builds:
+            msg = build.get_message()
+            print ' %5d:' % build.revision, cformat(msg, build.result)
 
     return builder_status
 
