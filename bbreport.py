@@ -182,7 +182,7 @@ class Build(object):
         if self.result in (S_SUCCESS, S_BUILDING):
             msg = self.result
         else:
-            if self._message is None or self._message == 'test':
+            if self._message is None or 'test' in self._message:
                 self._parse_stdio()
             if self.failed_tests:
                 msg = '%s failed: %s' % (len(self.failed_tests),
