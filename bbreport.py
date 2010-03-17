@@ -29,8 +29,7 @@ RE_BUILD = re.compile('Build #(\d+)</h1>\r?\n?'
                       '<h2>Results:</h2>\r?\n?'
                       '<span class="([^"]+)">')
 RE_BUILD_REVISION = re.compile('<li>Revision: (\d+)</li>')
-RE_FAILED = re.compile('(\d+) tests? failed:'
-                       '((?:\r?\n? +([^<\r\n]+))+)')
+RE_FAILED = re.compile('(\d+) tests? failed:((?:\r?\n? +([^\r\n]+))+)')
 RE_TIMEOUT = re.compile('command timed out: ([^,]+)')
 RE_STOP = re.compile('(process killed by .+)')
 RE_BBTEST = re.compile('make: \*\*\* \[buildbottest\] (.+)')
@@ -120,7 +119,7 @@ class Build(object):
                 # Some buildbots hide the revision
                 self.result = self._parse_build()
         else:
-            # Retrieve the web page
+            # Fallback to the web page
             self.result = self._parse_build()
 
     @classmethod
@@ -252,6 +251,7 @@ def print_builder(name, results, quiet):
             msg = msg[:MSG_MAXLENGTH - 3] + '...'
         print '- ' + cformat(msg, color)
     else:
+        # Move to next line
         print
 
     if not quiet:
