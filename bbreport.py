@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 # -*- coding: utf-8 -*-
 import re
 import urllib
@@ -168,9 +169,9 @@ class Build(object):
             assert len(self.failed_tests) == count_tests
             return
 
-        match = (RE_STOP.search(stdio) or
-                 RE_BBTEST.search(stdio) or
-                 RE_TIMEOUT.search(stdio))
+        match = (RE_BBTEST.search(stdio) or
+                 RE_TIMEOUT.search(stdio) or
+                 RE_STOP.search(stdio))
         if match:
             self._message = match.group(1).strip()
         else:
