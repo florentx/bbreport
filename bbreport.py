@@ -246,9 +246,9 @@ def print_builder(name, builds, quiet):
         # Print only the colored buildbot names
         if 0 == count[S_SUCCESS] == count[S_FAILURE]:
             return S_OFFLINE
-        last_status = results[0][1]
-        if last_status in (S_SUCCESS, S_BUILDING):
-            return last_status
+        last_result = builds[0].result
+        if last_result in (S_SUCCESS, S_BUILDING):
+            return last_result
         return S_FAILURE
 
     if count[S_SUCCESS] == 0:
