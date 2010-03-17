@@ -7,7 +7,7 @@ import fnmatch
 import optparse
 import xmlrpclib
 
-__version__ = '0.1.0.dev1'
+__version__ = '0.1dev'
 
 NUMBUILDS = 6
 DEFAULT_TIMEOUT = 2
@@ -213,20 +213,20 @@ class Build(object):
         return dict(num=self.num, data=self.data)
 
 
-def print_builder(name, results, quiet):
-    # (build.revision, build.result, build.get_message)
+def print_builder(name, builds, quiet):
 
     count = {S_SUCCESS: 0, S_FAILURE: 0}
     short = []
     long = []
 
-    for rev, result, get_msg in results:
+    for build in builds:
+        result = build.result
         if result == S_BUILDING:
             s = ' *** ' if len(short) < 2 else '***'
             short.append(cformat(s, _colors[result]))
             continue
 
-        shortrev = '%5d' % rev
+        shortrev = '%5d' % build.revision
         if len(short) > 1:
             shortrev = shortrev[-3:]
         short.append(cformat(shortrev, _colors[result]))
@@ -235,7 +235,7 @@ def print_builder(name, results, quiet):
             count[S_SUCCESS] += 1
         else:
             count[S_FAILURE] += 1
-            long.append((rev, get_msg, _colors[result]))
+            long.append((build.revision, build.get_message, _colors[result]))
 
     if quiet > 1:
         # Print only the colored buildbot names
@@ -390,7 +390,7 @@ def main():
             # passed to a printer function.  The same list may be used
             # to generate other kind of reports (e.g. HTML, XML, ...).
 
-            results.append((build.revision, build.result, build.get_message))
+            results.append(build)
             builder.builds[build.num] = build
 
         builder_status = print_builder(str(builder), results,
