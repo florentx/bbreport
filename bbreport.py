@@ -28,7 +28,7 @@ BUILDER_STATUSES = (S_BUILDING, S_SUCCESS, S_UNSTABLE, S_FAILURE, S_OFFLINE)
 # Regular expressions
 RE_BUILD = re.compile('Build #(\d+)</h1>\r?\n?'
                       '<h2>Results:</h2>\r?\n?'
-                      '<span class="([^"]+)">')
+                      '<span class="([^"]+)">([^<]+)</span>')
 RE_BUILD_REVISION = re.compile('<li>Revision: (\d+)</li>')
 RE_FAILED = re.compile('(\d+) tests? failed:((?:\r?\n? +([^\r\n]+))+)')
 RE_TIMEOUT = re.compile('command timed out: (\d+) ([^,]+)')
@@ -114,6 +114,7 @@ class Build(object):
 
     def __init__(self, name, buildnum, *args):
         self.num = buildnum
+        self.revision = 0
         self._url = '%s/builders/%s/builds/' % (baseurl, urllib.quote(name))
         self.failed_tests = []
         if args:
@@ -124,8 +125,8 @@ class Build(object):
                 # Store the failure details
                 self._message = ' '.join(args[5])
             if revision:
-                self.result = result
                 self.revision = int(revision)
+                self.result = result
             else:
                 # Some buildbots hide the revision
                 self.result = self._parse_build()
@@ -149,22 +150,20 @@ class Build(object):
         return self._data
 
     def _parse_build(self):
-        # retrieve num, revision, result
-        text = urlread(self.url)
-        if not text:
-            self.revision = self.num
+        # retrieve num, result, revision and message
+        build_page = urlread(self.url)
+        if not build_page:
             return S_BUILDING
-        match = RE_BUILD.search(text)
+        match = RE_BUILD.search(build_page)
         if match:
             self.num = int(match.group(1))
-            result = match.group(2).strip()
+            result = match.group(2)
+            self._message = match.group(3)
         else:
             result = S_BUILDING
-        match = RE_BUILD_REVISION.search(text)
+        match = RE_BUILD_REVISION.search(build_page)
         if match:
             self.revision = int(match.group(1))
-        else:
-            self.revision = self.num
         return result
 
     def _parse_stdio(self):
@@ -259,16 +258,16 @@ def print_builder(name, builds, quiet):
         result = build.result
         compact = (quiet or len(builds) > 6) and len(capsule) > 1
 
-        if result == S_BUILDING:
-            s = ' *** ' if not compact else '***'
-            capsule.append(cformat(s, result))
-            continue
-
-        revision = '%5d' % build.revision
-        rev = revision if not compact else revision[-3:]
+        if build.revision:
+            revision = '%5d' % build.revision
+            rev = revision if not compact else revision[-3:]
+        else:
+            rev = ' *** ' if not compact else '***'
         capsule.append(cformat(rev, result))
 
-        if result == S_SUCCESS:
+        if result == S_BUILDING:
+            continue
+        elif result == S_SUCCESS:
             count[S_SUCCESS] += 1
         else:
             count[S_FAILURE] += 1
