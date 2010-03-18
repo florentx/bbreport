@@ -31,10 +31,12 @@ RE_BUILD = re.compile('Build #(\d+)</h1>\r?\n?'
                       '<span class="([^"]+)">')
 RE_BUILD_REVISION = re.compile('<li>Revision: (\d+)</li>')
 RE_FAILED = re.compile('(\d+) tests? failed:((?:\r?\n? +([^\r\n]+))+)')
-RE_DISKFULL = re.compile('write failed, (filesystem is full)')
 RE_TIMEOUT = re.compile('command timed out: (\d+) ([^,]+)')
 RE_STOP = re.compile('(process killed by .+)')
 RE_BBTEST = re.compile('make: \*\*\* \[buildbottest\] (.+)')
+
+# Buildbot errors
+OSERRORS = ('filesystem is full', 'Cannot allocate memory')
 
 # HTML pollution in the stdio log
 HTMLNOISE = '</span><span class="stdout">'
@@ -177,26 +179,33 @@ class Build(object):
             self.failed_tests = failed_tests.split()
             assert len(self.failed_tests) == failed_count
 
-        # Check if disk full
-        full = RE_DISKFULL.search(stdio)
-        if full:
-            self.result = S_EXCEPTION
-            self._message = full.group(1)
-        else:
-            self._message = ''
+        lines = stdio.splitlines()
 
-        if fail or full:
+        # Check if disk full or out of memory
+        for line in lines:
+            for error in OSERRORS:
+                if error in line:
+                    break
+            else:
+                continue
+            self.result = S_EXCEPTION
+            self._message = error.lower()
+            break
+        else:
+            self._message = error = ''
+
+        if fail or error:
             # If something is found, stop here
             return
 
         self._message = 'something crashed'
-        lines = reversed(stdio.splitlines())
-        for line in lines:
+        reversed_lines = reversed(lines)
+        for line in reversed_lines:
             killed = RE_BBTEST.search(line) or RE_STOP.search(line)
             if killed:
                 self._message = killed.group(1).strip().lower()
                 # Check previous line for a possible timeout
-                line = next(lines)
+                line = next(reversed_lines)
 
             timeout = RE_TIMEOUT.search(line)
             if timeout:
@@ -205,7 +214,7 @@ class Build(object):
                 self.result = S_FAILURE
                 self._message = 'hung for %d min' % minutes
                 # Move to previous line
-                line = next(lines)
+                line = next(reversed_lines)
 
             if line.startswith('test_'):
                 # This is the last running test
@@ -248,14 +257,15 @@ def print_builder(name, builds, quiet):
 
     for build in builds:
         result = build.result
+        compact = (quiet or len(builds) > 6) and len(capsule) > 1
+
         if result == S_BUILDING:
-            s = ' *** ' if (not quiet or len(capsule) < 2) else '***'
+            s = ' *** ' if not compact else '***'
             capsule.append(cformat(s, result))
             continue
 
-        rev = '%5d' % build.revision
-        if quiet and len(capsule) > 1:
-            rev = rev[-3:]
+        revision = '%5d' % build.revision
+        rev = revision if not compact else revision[-3:]
         capsule.append(cformat(rev, result))
 
         if result == S_SUCCESS:
@@ -396,6 +406,9 @@ def main():
         numbuilds = 2
         groups = dict((s, []) for s in BUILDER_STATUSES)
         print "... retrieving last build results"
+    elif not options.quiet and len(selected_builders) < 3:
+        # show more builds
+        numbuilds = NUMBUILDS * 2
     else:
         numbuilds = NUMBUILDS
 
