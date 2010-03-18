@@ -18,9 +18,9 @@ baseurl = 'http://www.python.org/dev/buildbot/'
 # Common statuses for Builds and Builders
 S_BUILDING = 'building'
 S_SUCCESS = 'success'
-S_UNSTABLE = 'unstable'
 S_FAILURE = 'failure'
 S_EXCEPTION = 'exception'   # Build only (mapped to S_FAILURE)
+S_UNSTABLE = 'unstable'     # Builder only (intermittent failures)
 S_OFFLINE = 'offline'       # Builder only (mapped to S_BUILDING)
 
 BUILDER_STATUSES = (S_BUILDING, S_SUCCESS, S_UNSTABLE, S_FAILURE, S_OFFLINE)
@@ -32,7 +32,7 @@ RE_BUILD = re.compile('Build #(\d+)</h1>\r?\n?'
 RE_BUILD_REVISION = re.compile('<li>Revision: (\d+)</li>')
 RE_FAILED = re.compile('(\d+) tests? failed:((?:\r?\n? +([^\r\n]+))+)')
 RE_DISKFULL = re.compile('write failed, (filesystem is full)')
-RE_TIMEOUT = re.compile('command timed out: ([^,]+)')
+RE_TIMEOUT = re.compile('command timed out: (\d+) ([^,]+)')
 RE_STOP = re.compile('(process killed by .+)')
 RE_BBTEST = re.compile('make: \*\*\* \[buildbottest\] (.+)')
 
@@ -104,7 +104,8 @@ class Build(object):
     """
     Represent a single build of a builder.
 
-    Build.result should be one of (S_SUCCESS, S_FAILURE, S_UNSTABLE).
+    Build.result should be one of (S_SUCCESS, S_FAILURE, S_EXCEPTION).
+    If the result is not available, it defaults to S_BUILDING.
     """
     _data = None
     _message = None
@@ -168,14 +169,6 @@ class Build(object):
         stdio = urlread(self.url + '/steps/test/logs/stdio')
         stdio = stdio.replace(HTMLNOISE, '')
 
-        # Check if disk full
-        full = RE_DISKFULL.search(stdio)
-        if full:
-            self.result = S_EXCEPTION
-            self._message = full.group(1)
-        else:
-            self._message = ''
-
         # Check if some test failed
         fail = RE_FAILED.search(stdio)
         if fail:
@@ -184,15 +177,38 @@ class Build(object):
             self.failed_tests = failed_tests.split()
             assert len(self.failed_tests) == count_tests
 
+        # Check if disk full
+        full = RE_DISKFULL.search(stdio)
+        if full:
+            self.result = S_EXCEPTION
+            self._message = full.group(1)
+        else:
+            self._message = ''
+
         if fail or full:
             # If something is found, stop here
             return
 
-        match = (RE_BBTEST.search(stdio) or
-                 RE_TIMEOUT.search(stdio) or
-                 RE_STOP.search(stdio))
-        if match:
-            self._message = match.group(1).strip().lower()
+        lines = reversed(stdio.splitlines())
+        for line in lines:
+            killed = (RE_BBTEST.search(line) or RE_STOP.search(line))
+            if killed:
+                self._message = killed.group(1).strip().lower()
+                # Check previous line for a possible timeout
+                line = next(lines)
+
+            timeout = RE_TIMEOUT.search(line)
+            if timeout:
+                # Find the hanging test
+                for line in lines:
+                    if re.match('test_', line):
+                        self._message = line + ': '
+                        break
+                minutes = int(timeout.group(1)) // 60
+                self._message += '%d min without output' % minutes
+            elif not killed:
+                continue
+            break
         else:
             self._message = self.result + ': something crashed'
 
@@ -305,8 +321,7 @@ def print_final(counts):
     for status in BUILDER_STATUSES:
         if counts[status]:
             totals.append(cformat(counts[status], status))
-    print 'Totals:',
-    print ' + '.join(totals)
+    print 'Totals:', ' + '.join(totals)
 
 
 def parse_args():
