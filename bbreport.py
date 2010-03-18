@@ -201,6 +201,8 @@ class Build(object):
             timeout = RE_TIMEOUT.search(line)
             if timeout:
                 minutes = int(timeout.group(1)) // 60
+                # It is a test failure
+                self.result = S_FAILURE
                 self._message = 'hung for %d min' % minutes
                 # Move to previous line
                 line = next(lines)
