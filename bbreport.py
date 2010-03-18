@@ -321,7 +321,8 @@ def parse_args():
                       metavar='BRANCHES',
                       help='the Python branches (e.g. 2.6,3.1)')
     parser.add_option('-u', '--build', dest='build', default=None,
-                      metavar='num', help='the build number of a buildslave')
+                      metavar='num', help='the build number of a buildslave'
+                                          ' (not implemented)')
     parser.add_option('-f', '--failures', dest='failures',
                       action='append', default=[],
                       metavar='test_xyz', help='the name of a failed test')
@@ -329,6 +330,11 @@ def parse_args():
                       help='one line per builder, or group by status with -qq')
 
     options, args = parser.parse_args()
+
+    if options.failures:
+        # Ignore the -q option
+        options.quiet = 0
+
     #print options, args
     return options, args
 
@@ -374,6 +380,9 @@ def main():
     else:
         numbuilds = NUMBUILDS
 
+    if options.failures:
+        print "... retrieving build results"
+
     counters = dict((s, 0) for s in BUILDER_STATUSES)
 
     # loop through the builders and their builds
@@ -383,18 +392,21 @@ def main():
 
         # Fill the list with tuples like (builder_name, -1).
         lastbuilds = [(str(builder), -1 - i)
-                  for i in range(numbuilds - len(xmlrpcbuilds))]
+                      for i in range(numbuilds - len(xmlrpcbuilds))]
         lastbuilds += reversed(xmlrpcbuilds)
+
+        # default value is True without "-f" option
+        found_failure = not options.failures
 
         builds = []
         for build_info in lastbuilds:
             build = Build(*build_info)
 
-            if options.failures:
+            if not found_failure:
                 # Retrieve the failed tests
                 build.get_message()
-                if not set(options.failures) <= set(build.failed_tests):
-                    continue
+                if set(options.failures) <= set(build.failed_tests):
+                    found_failure = True
 
             # These data are accumulated in a list of results which is
             # passed to a printer function.  The same list may be used
@@ -402,6 +414,10 @@ def main():
 
             builds.append(build)
             builder.builds[build.num] = build
+
+        if not found_failure:
+            # no build matched the options.failures
+            continue
 
         builder_status = print_builder(str(builder), builds,
                                        quiet=options.quiet)
