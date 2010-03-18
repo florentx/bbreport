@@ -191,6 +191,7 @@ class Build(object):
             # If something is found, stop here
             return
 
+        self._message = 'something crashed'
         lines = reversed(stdio.splitlines())
         for line in lines:
             killed = RE_BBTEST.search(line) or RE_STOP.search(line)
@@ -203,17 +204,14 @@ class Build(object):
             if timeout:
                 minutes = int(timeout.group(1)) // 60
                 self._message = 'hung for %d min' % minutes
-                # Find the hanging test
-                for line in lines:
-                    if re.match('test_', line):
-                        self.failed_tests = [line]
-                        self._message += ': ' + line
-                        break
-            elif not killed:
-                continue
-            break
-        else:
-            self._message = self.result + ': something crashed'
+                # Move to previous line
+                line = next(lines)
+
+            if line.startswith('test_'):
+                # This is the last running test
+                self.failed_tests = [line]
+                self._message += ': ' + line
+                break
 
     def get_message(self):
         # Parse stdio on demand
