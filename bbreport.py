@@ -172,16 +172,18 @@ class Build(object):
         # Check if some test failed
         fail = RE_FAILED.search(stdio)
         if fail:
-            count_tests = int(fail.group(1))
+            failed_count = int(fail.group(1))
             failed_tests = fail.group(2).strip()
             self.failed_tests = failed_tests.split()
-            assert len(self.failed_tests) == count_tests
+            assert len(self.failed_tests) == failed_count
 
         # Check if disk full
         full = RE_DISKFULL.search(stdio)
         if full:
             self.result = S_EXCEPTION
             self._message = full.group(1)
+            if fail:
+                self._message += ' (%s failed)' % failed_count
         else:
             self._message = ''
 
@@ -191,7 +193,7 @@ class Build(object):
 
         lines = reversed(stdio.splitlines())
         for line in lines:
-            killed = (RE_BBTEST.search(line) or RE_STOP.search(line))
+            killed = RE_BBTEST.search(line) or RE_STOP.search(line)
             if killed:
                 self._message = killed.group(1).strip().lower()
                 # Check previous line for a possible timeout
@@ -199,13 +201,14 @@ class Build(object):
 
             timeout = RE_TIMEOUT.search(line)
             if timeout:
+                minutes = int(timeout.group(1)) // 60
+                self._message = 'hung for %d min' % minutes
                 # Find the hanging test
                 for line in lines:
                     if re.match('test_', line):
-                        self._message = line + ': '
+                        self.failed_tests = [line]
+                        self._message += ': ' + line
                         break
-                minutes = int(timeout.group(1)) // 60
-                self._message += '%d min without output' % minutes
             elif not killed:
                 continue
             break
@@ -220,13 +223,9 @@ class Build(object):
             if self._message is None or 'test' in self._message:
                 self._parse_stdio()
             msg = self._message
-            if self.failed_tests:
-                if msg:
-                    # Disk full or some other error
-                    msg += ' (%s failed)' % len(self.failed_tests)
-                else:
-                    msg = '%s failed: %s' % (len(self.failed_tests),
-                                             ' '.join(self.failed_tests))
+            if self.failed_tests and not msg:
+                msg = '%s failed: %s' % (len(self.failed_tests),
+                                         ' '.join(self.failed_tests))
         return msg
 
     def asdict(self):
@@ -239,20 +238,20 @@ class Build(object):
 def print_builder(name, builds, quiet):
 
     count = {S_SUCCESS: 0, S_FAILURE: 0}
-    short = []
+    capsule = []
     failed_builds = []
 
     for build in builds:
         result = build.result
         if result == S_BUILDING:
-            s = ' *** ' if len(short) < 2 else '***'
-            short.append(cformat(s, result))
+            s = ' *** ' if (not quiet or len(capsule) < 2) else '***'
+            capsule.append(cformat(s, result))
             continue
 
-        shortrev = '%5d' % build.revision
-        if len(short) > 1:
-            shortrev = shortrev[-3:]
-        short.append(cformat(shortrev, result))
+        rev = '%5d' % build.revision
+        if quiet and len(capsule) > 1:
+            rev = rev[-3:]
+        capsule.append(cformat(rev, result))
 
         if result == S_SUCCESS:
             count[S_SUCCESS] += 1
@@ -272,7 +271,7 @@ def print_builder(name, builds, quiet):
     if count[S_SUCCESS] == 0:
         if count[S_FAILURE] == 0:
             builder_status = S_OFFLINE
-            short = [cformat(' *** ', S_OFFLINE)] * 2
+            capsule = [cformat(' *** ', S_OFFLINE)] * 2
         else:
             builder_status = S_FAILURE
     elif count[S_FAILURE] > 0:
@@ -280,7 +279,7 @@ def print_builder(name, builds, quiet):
     else:
         builder_status = S_SUCCESS
 
-    print cformat('%-26s' % name, builder_status), ', '.join(short),
+    print cformat('%-26s' % name, builder_status), ', '.join(capsule),
 
     if quiet and failed_builds:
         # Print last failure or error.
