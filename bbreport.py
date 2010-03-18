@@ -182,8 +182,6 @@ class Build(object):
         if full:
             self.result = S_EXCEPTION
             self._message = full.group(1)
-            if fail:
-                self._message += ' (%s failed)' % failed_count
         else:
             self._message = ''
 
@@ -210,7 +208,6 @@ class Build(object):
             if line.startswith('test_'):
                 # This is the last running test
                 self.failed_tests = [line]
-                self._message += ': ' + line
                 break
 
     def get_message(self):
@@ -221,8 +218,16 @@ class Build(object):
             if self._message is None or 'test' in self._message:
                 self._parse_stdio()
             msg = self._message
-            if self.failed_tests and not msg:
-                msg = '%s failed: %s' % (len(self.failed_tests),
+            if self.failed_tests:
+                if self.result == S_EXCEPTION:
+                    # disk full or other buildbot error
+                    msg += ' (%s failed)' % len(self.failed_tests)
+                elif msg:
+                    # process killed: print last test
+                    msg += ': ' + ' '.join(self.failed_tests)
+                else:
+                    # test failures
+                    msg = '%s failed: %s' % (len(self.failed_tests),
                                          ' '.join(self.failed_tests))
         return msg
 
