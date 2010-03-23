@@ -389,18 +389,20 @@ def main():
     if options.branches:
         branches = options.branches.split(',')
     elif args:
-        branches = args or ['all']
-    elif not options.name:
-        branches = DEFAULT_BRANCHES.split()
-    else:
+        branches = args
+    elif options.name:
+        # there's a name filter defined
         branches = ['all']
+    else:
+        # no explicit filter: restrict to the default branches
+        branches = DEFAULT_BRANCHES.split()
 
-    if 'all' not in branches:
+    if 'all' in branches:
+        selected_builders = builders
+    else:
         # filter by branch
         selected_builders = [builder for builder in builders
                              if builder.branch in branches]
-    else:
-        selected_builders = builders
 
     if options.name:
         # filter by name
