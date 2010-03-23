@@ -10,6 +10,7 @@ import xmlrpclib
 __version__ = '0.1dev'
 
 NUMBUILDS = 6
+DEFAULT_BRANCHES = 'all'
 DEFAULT_TIMEOUT = 2
 MSG_MAXLENGTH = 60
 
@@ -34,9 +35,12 @@ RE_FAILED = re.compile('(\d+) tests? failed:((?:\r?\n? +([^\r\n]+))+)')
 RE_TIMEOUT = re.compile('command timed out: (\d+) ([^,]+)')
 RE_STOP = re.compile('(process killed by .+)')
 RE_BBTEST = re.compile('make: \*\*\* \[buildbottest\] (.+)')
+RE_TEST = re.compile('(test_[^ ]+)$')
 
 # Buildbot errors
-OSERRORS = ('filesystem is full', 'Cannot allocate memory')
+OSERRORS = ('filesystem is full',
+            'No space left on device',
+            'Cannot allocate memory')
 
 # HTML pollution in the stdio log
 HTMLNOISE = '</span><span class="stdout">'
@@ -215,9 +219,10 @@ class Build(object):
                 # Move to previous line
                 line = next(reversed_lines)
 
-            if line.startswith('test_'):
+            failed = RE_TEST.match(line)
+            if failed:
                 # This is the last running test
-                self.failed_tests = [line]
+                self.failed_tests = [failed.group(1)]
                 break
 
     def get_message(self):
@@ -229,15 +234,16 @@ class Build(object):
                 self._parse_stdio()
             msg = self._message
             if self.failed_tests:
-                if self.result == S_EXCEPTION:
+                count_failed = len(self.failed_tests)
+                if self.result == S_EXCEPTION and count_failed > 2:
                     # disk full or other buildbot error
-                    msg += ' (%s failed)' % len(self.failed_tests)
+                    msg += ' (%s failed)' % count_failed
                 elif msg:
                     # process killed: print last test
                     msg += ': ' + ' '.join(self.failed_tests)
                 else:
                     # test failures
-                    msg = '%s failed: %s' % (len(self.failed_tests),
+                    msg = '%s failed: %s' % (count_failed,
                                          ' '.join(self.failed_tests))
         return msg
 
@@ -382,10 +388,14 @@ def main():
 
     if options.branches:
         branches = options.branches.split(',')
+    elif args:
+        branches = args or ['all']
+    elif not options.name:
+        branches = DEFAULT_BRANCHES.split()
     else:
-        branches = args
+        branches = ['all']
 
-    if branches:
+    if 'all' not in branches:
         # filter by branch
         selected_builders = [builder for builder in builders
                              if builder.branch in branches]
