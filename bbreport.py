@@ -13,6 +13,16 @@ NUMBUILDS = 6
 DEFAULT_BRANCHES = 'all'
 DEFAULT_TIMEOUT = 2
 MSG_MAXLENGTH = 60
+DEFAULT_OUTPUT = {
+    # keywords: <ansi color>, bright, bold
+    # use an empty string to preserve terminal settings
+    'foreground': 'white bright',
+    'background': 'black',
+    # set to False to disable colors
+    'color': True,
+}
+ANSI_COLOR = ('black', 'red', 'green', 'yellow',
+              'blue', 'magenta', 'cyan', 'white')
 
 baseurl = 'http://www.python.org/dev/buildbot/'
 
@@ -45,23 +55,50 @@ OSERRORS = ('filesystem is full',
 # HTML pollution in the stdio log
 HTMLNOISE = '</span><span class="stdout">'
 
-# Colored output
-_shell_colors = {'black':   '30;01',
-                 'red':     '31;01',
-                 'green':   '32;01',
-                 'yellow':  '33;01',
-                 'blue':    '34;01'}
+# Format output
+SYMBOL = {'black': '.', 'red': '#', 'green': ' ', 'yellow': '?', 'blue': '*'}
 
 _colors = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
            S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'black'}
 
-for status, color in _colors.items():
-    _shell_colors[status] = _shell_colors[color]
-del _colors
+
+def _prepare_output():
+    fg_offset = 90 if ('bright' in DEFAULT_OUTPUT['foreground']) else 30
+    bg_offset = 100 if ('bright' in DEFAULT_OUTPUT['background']) else 40
+    _base = '\x1b['
+    if 'bold' in DEFAULT_OUTPUT['foreground']:
+        _base += '1;'
+    bg_color = next((bg_offset + idx for (idx, color) in enumerate(ANSI_COLOR)
+                     if color in DEFAULT_OUTPUT['background']), 49)
+    fg_color = next((fg_offset + idx for (idx, color) in enumerate(ANSI_COLOR)
+                     if color in DEFAULT_OUTPUT['foreground']), 39)
+
+    for status, color in _colors.items():
+        SYMBOL[status] = SYMBOL[color]
+        _escape_sequence[status] = '%s%s;%sm%%s\x1b[%sm' % \
+            (_base, fg_offset + ANSI_COLOR.index(color), bg_color, fg_color)
 
 
-def cformat(text, color):
-    return '\x1b[%sm%s\x1b[39;49;00m' % (_shell_colors[color], text)
+_escape_sequence = {}
+_prepare_output()
+del _colors, _prepare_output
+
+
+def _cformat_plain(text, color, sep=' '):
+    return sep.join((SYMBOL[color], str(text)))
+
+
+def _cformat_color(text, color, sep=None):
+    return _escape_sequence[color] % text
+
+
+def reset_terminal():
+    if cformat == _cformat_color:
+        # reset terminal colors
+        print '\x1b[39;49;00m',
+    print
+
+cformat = _cformat_color if DEFAULT_OUTPUT['color'] else _cformat_plain
 
 
 def urlread(url):
@@ -137,6 +174,8 @@ class Build(object):
         else:
             # Fallback to the web page
             self.result = self._parse_build()
+        if self._message in ('failed svn',):
+            self.result = S_EXCEPTION
 
     @classmethod
     def fromdump(self, data):
@@ -186,10 +225,9 @@ class Build(object):
 
         # Check if disk full or out of memory
         for line in lines:
-            for error in OSERRORS:
-                if error in line:
-                    break
-            else:
+            try:
+                error = next(e for e in OSERRORS if e in line)
+            except StopIteration:
                 continue
             self.result = S_EXCEPTION
             self._message = error.lower()
@@ -224,6 +262,9 @@ class Build(object):
                 # This is the last running test
                 self.failed_tests = [failed.group(1)]
                 break
+        else:
+            # No test failure: probably a buildbot error
+            self.result = S_EXCEPTION
 
     def get_message(self):
         # Parse stdio on demand
@@ -269,7 +310,7 @@ def print_builder(name, builds, quiet):
             rev = revision if not compact else revision[-3:]
         else:
             rev = ' *** ' if not compact else '***'
-        capsule.append(cformat(rev, result))
+        capsule.append(cformat(rev, result, sep=''))
 
         if result == S_BUILDING:
             continue
@@ -291,7 +332,7 @@ def print_builder(name, builds, quiet):
     if count[S_SUCCESS] == 0:
         if count[S_FAILURE] == 0:
             builder_status = S_OFFLINE
-            capsule = [cformat(' *** ', S_OFFLINE)] * 2
+            capsule = [cformat(' *** ', S_OFFLINE, sep='')] * 2
         else:
             builder_status = S_FAILURE
     elif count[S_FAILURE] > 0:
@@ -307,7 +348,7 @@ def print_builder(name, builds, quiet):
         msg = build.get_message()
         if len(msg) > MSG_MAXLENGTH:
             msg = msg[:MSG_MAXLENGTH - 3] + '...'
-        print '- ' + cformat(msg, build.result)
+        print SYMBOL[build.result], msg
     else:
         # Move to next line
         print
@@ -315,7 +356,7 @@ def print_builder(name, builds, quiet):
     if not quiet:
         for build in failed_builds:
             msg = build.get_message()
-            print ' %5d:' % build.revision, cformat(msg, build.result)
+            print ' %5d:' % build.revision, SYMBOL[build.result], msg
 
     return builder_status
 
@@ -339,14 +380,16 @@ def print_final(counts):
     totals = []
     for status in BUILDER_STATUSES:
         if counts[status]:
-            totals.append(cformat(counts[status], status))
-    print 'Totals:', ' + '.join(totals)
+            totals.append(cformat(counts[status], status, sep=':'))
+    print 'Totals:', ' + '.join(totals),
 
 
 def parse_args():
     """
     Create an option parser, parse the result and return options and args.
     """
+    global cformat
+
     parser = optparse.OptionParser(version=__version__,
                                    usage="%prog [options] branch ...")
     parser.add_option('-n', '--name', dest='name', default=None,
@@ -362,12 +405,18 @@ def parse_args():
                       metavar='test_xyz', help='the name of a failed test')
     parser.add_option('-q', '--quiet', default=0, action='count',
                       help='one line per builder, or group by status with -qq')
+    parser.add_option('--no-color', default=False, action='store_true',
+                      help='do not color the output')
 
     options, args = parser.parse_args()
 
     if options.failures:
-        # Ignore the -q option
+        # ignore the -q option
         options.quiet = 0
+
+    if options.no_color:
+        # replace the colorizer
+        cformat = _cformat_plain
 
     #print options, args
     return options, args
@@ -480,4 +529,7 @@ def main():
 
 if __name__ == '__main__':
     # set the builders var -- useful with python -i
-    builders = main()
+    try:
+        builders = main()
+    finally:
+        reset_terminal()
