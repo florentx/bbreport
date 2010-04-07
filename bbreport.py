@@ -278,7 +278,6 @@ class Build(object):
             if self._message is None or 'test' in self._message:
                 # Parse stdio on demand
                 self._parse_stdio()
-            self.save()
         msg = self._message
         if self.failed_tests:
             count_failed = len(self.failed_tests)
