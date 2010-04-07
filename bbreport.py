@@ -56,22 +56,22 @@ OSERRORS = ('filesystem is full',
 HTMLNOISE = '</span><span class="stdout">'
 
 # Format output
-SYMBOL = {'black': '.', 'red': '#', 'green': ' ', 'yellow': '?', 'blue': '*'}
+SYMBOL = {'black': '.', 'red': '#', 'green': '_', 'yellow': '?', 'blue': '*'}
 
 _colors = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
            S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'black'}
 
 
 def _prepare_output():
-    fg_offset = 90 if ('bright' in DEFAULT_OUTPUT['foreground']) else 30
-    bg_offset = 100 if ('bright' in DEFAULT_OUTPUT['background']) else 40
-    _base = '\x1b['
-    if 'bold' in DEFAULT_OUTPUT['foreground']:
-        _base += '1;'
-    bg_color = next((bg_offset + idx for (idx, color) in enumerate(ANSI_COLOR)
-                     if color in DEFAULT_OUTPUT['background']), 49)
+    default_fg = DEFAULT_OUTPUT['foreground'].lower()
+    default_bg = DEFAULT_OUTPUT['background'].lower()
+    _base = '\x1b[1;' if ('bold' in default_fg) else '\x1b['
+    fg_offset =  90 if ('bright' in default_fg) else 30
+    bg_offset = 100 if ('bright' in default_bg) else 40
     fg_color = next((fg_offset + idx for (idx, color) in enumerate(ANSI_COLOR)
-                     if color in DEFAULT_OUTPUT['foreground']), 39)
+                     if color in default_fg), 39)
+    bg_color = next((bg_offset + idx for (idx, color) in enumerate(ANSI_COLOR)
+                     if color in default_bg), 49)
 
     for status, color in _colors.items():
         SYMBOL[status] = SYMBOL[color]
@@ -113,16 +113,17 @@ class Builder(object):
     """
     Represent a builder.
     """
+    lastbuild = 0
+
     def __init__(self, name):
         self.name = name
         # the branch name should always be the last part of the name
         self.host, self.branch = name.rsplit(None, 1)
         self.url = baseurl + 'builders/' + urllib.quote(name)
         self.builds = {}
-        self.lastbuild = 0
 
     @classmethod
-    def fromdump(self, data):
+    def fromdump(cls, data):
         """
         Alternate contructor to create the object from a serialized builder.
         """
@@ -133,6 +134,14 @@ class Builder(object):
 
     def __str__(self):
         return self.name
+
+    def add(self, *builds):
+        last = self.lastbuild
+        for build in builds:
+            self.builds[build.num] = build
+            last = max(last, build.num)
+        if last > self.lastbuild:
+            self.lastbuild = last
 
     def asdict(self):
         """
@@ -150,12 +159,12 @@ class Build(object):
     Build.result should be one of (S_SUCCESS, S_FAILURE, S_EXCEPTION).
     If the result is not available, it defaults to S_BUILDING.
     """
-    _data = None
-    _message = None
+    _data = _message = result = None
+    revision = 0
 
     def __init__(self, name, buildnum, *args):
+        self.builder = name
         self.num = buildnum
-        self.revision = 0
         self._url = '%s/builders/%s/builds/' % (baseurl, urllib.quote(name))
         self.failed_tests = []
         if args:
@@ -168,17 +177,14 @@ class Build(object):
             if revision:
                 self.revision = int(revision)
                 self.result = result
-            else:
-                # Some buildbots hide the revision
-                self.result = self._parse_build()
-        else:
+        if not self.result:
             # Fallback to the web page
             self.result = self._parse_build()
         if self._message in ('failed svn',):
             self.result = S_EXCEPTION
 
     @classmethod
-    def fromdump(self, data):
+    def fromdump(cls, data):
         """
         Alternate contructor to create the object from a serialized builder.
         """
@@ -225,9 +231,8 @@ class Build(object):
 
         # Check if disk full or out of memory
         for line in lines:
-            try:
-                error = next(e for e in OSERRORS if e in line)
-            except StopIteration:
+            error = next((e for e in OSERRORS if e in line), None)
+            if error is None:
                 continue
             self.result = S_EXCEPTION
             self._message = error.lower()
@@ -267,24 +272,25 @@ class Build(object):
             self.result = S_EXCEPTION
 
     def get_message(self):
-        # Parse stdio on demand
         if self.result in (S_SUCCESS, S_BUILDING):
-            msg = self.result
+            return self.result
         else:
             if self._message is None or 'test' in self._message:
+                # Parse stdio on demand
                 self._parse_stdio()
-            msg = self._message
-            if self.failed_tests:
-                count_failed = len(self.failed_tests)
-                if self.result == S_EXCEPTION and count_failed > 2:
-                    # disk full or other buildbot error
-                    msg += ' (%s failed)' % count_failed
-                elif msg:
-                    # process killed: print last test
-                    msg += ': ' + ' '.join(self.failed_tests)
-                else:
-                    # test failures
-                    msg = '%s failed: %s' % (count_failed,
+            self.save()
+        msg = self._message
+        if self.failed_tests:
+            count_failed = len(self.failed_tests)
+            if self.result == S_EXCEPTION and count_failed > 2:
+                # disk full or other buildbot error
+                msg += ' (%s failed)' % count_failed
+            elif msg:
+                # process killed: print last test
+                msg += ': ' + ' '.join(self.failed_tests)
+            else:
+                # test failures
+                msg = '%s failed: %s' % (count_failed,
                                          ' '.join(self.failed_tests))
         return msg
 
@@ -429,11 +435,10 @@ def main():
     proxy = xmlrpclib.ServerProxy(baseurl + 'all/xmlrpc')
 
     # create the list of builders
-    names = proxy.getAllBuilders()
+    builders = (Builder(name) for name in proxy.getAllBuilders())
 
     # sort by branch and name
-    builders = sorted((Builder(name) for name in names),
-                      key=lambda b: (b.branch, str(b)))
+    builders = sorted(builders, key=lambda b: (b.branch, str(b)))
 
     if options.branches:
         branches = options.branches.split(',')
@@ -472,6 +477,11 @@ def main():
     else:
         numbuilds = NUMBUILDS
 
+    # Retrieve the last builds
+    xrlastbuilds = {}
+    for xrb in proxy.getLastBuildsAllBuilders(numbuilds):
+        xrlastbuilds.setdefault(xrb[0], []).append(xrb)
+
     if options.failures:
         print "... retrieving build results"
 
@@ -480,7 +490,7 @@ def main():
     # loop through the builders and their builds
     for builder in selected_builders:
         # If the builder is working, the list may be partial or empty.
-        xmlrpcbuilds = proxy.getLastBuilds(str(builder), numbuilds)
+        xmlrpcbuilds = xrlastbuilds.get(str(builder), [])
 
         # Fill the list with tuples like (builder_name, -1).
         lastbuilds = [(str(builder), -1 - i)
@@ -505,7 +515,8 @@ def main():
             # to generate other kind of reports (e.g. HTML, XML, ...).
 
             builds.append(build)
-            builder.builds[build.num] = build
+
+        builder.add(*builds)
 
         if not found_failure:
             # no build matched the options.failures
@@ -528,8 +539,8 @@ def main():
 
 
 if __name__ == '__main__':
-    # set the builders var -- useful with python -i
     try:
+        # set the builders var -- useful with python -i
         builders = main()
     finally:
         reset_terminal()
