@@ -5,6 +5,10 @@ import urllib
 import urllib2
 import fnmatch
 import optparse
+import os
+import shutil
+import sqlite3
+import sys
 import xmlrpclib
 
 __version__ = '0.1dev'
@@ -25,6 +29,10 @@ ANSI_COLOR = ('black', 'red', 'green', 'yellow',
               'blue', 'magenta', 'cyan', 'white')
 
 baseurl = 'http://www.python.org/dev/buildbot/'
+dbfile = os.path.splitext(__file__)[0] + '.sqlite'
+
+# Global connection
+conn = None
 
 # Common statuses for Builds and Builders
 S_BUILDING = 'building'
@@ -113,6 +121,7 @@ class Builder(object):
     """
     Represent a builder.
     """
+    saved = status = None
     lastbuild = 0
 
     def __init__(self, name):
@@ -121,6 +130,9 @@ class Builder(object):
         self.host, self.branch = name.rsplit(None, 1)
         self.url = baseurl + 'builders/' + urllib.quote(name)
         self.builds = {}
+        self._load_builder()
+        if not self.saved:
+            self.save()
 
     @classmethod
     def fromdump(cls, data):
@@ -129,11 +141,27 @@ class Builder(object):
         """
         pass
 
+    @classmethod
+    def query_all(cls):
+        if conn is None:
+            return []
+        cur = conn.execute('select builder from builders')
+        return [cls(name) for (name,) in cur.fetchall()]
+
     def __eq__(self, other):
         return str(self) == str(other)
 
     def __str__(self):
         return self.name
+
+    def _load_builder(self):
+        if conn is None:
+            return
+        row = conn.execute('select lastbuild, status from builders where '
+                           'builder = ? ', (self.name,)).fetchone()
+        if row is not None:
+            self.saved = True
+            (self.lastbuild, self.status) = row
 
     def add(self, *builds):
         last = self.lastbuild
@@ -142,6 +170,22 @@ class Builder(object):
             last = max(last, build.num)
         if last > self.lastbuild:
             self.lastbuild = last
+            self.save()
+
+    def save(self):
+        if conn is None:
+            return
+        if self.saved:
+            conn.execute('update builders set lastbuild = ?, status = ? '
+                         'where builder = ?',
+                         (self.lastbuild, self.status, self.name))
+        else:
+            conn.execute('insert into builders(builder, host, branch, '
+                         'lastbuild, status) values (?, ?, ?, ?, ?)',
+                         (self.name, self.host, self.branch,
+                          self.lastbuild, self.status))
+            self.saved = True
+        return True
 
     def asdict(self):
         """
@@ -159,7 +203,7 @@ class Build(object):
     Build.result should be one of (S_SUCCESS, S_FAILURE, S_EXCEPTION).
     If the result is not available, it defaults to S_BUILDING.
     """
-    _data = _message = result = None
+    _data = _message = saved = result = None
     revision = 0
 
     def __init__(self, name, buildnum, *args):
@@ -167,6 +211,11 @@ class Build(object):
         self.num = buildnum
         self._url = '%s/builders/%s/builds/' % (baseurl, urllib.quote(name))
         self.failed_tests = []
+        if buildnum:
+            # Query the database
+            self.result = self._load_build()
+        if self.result:
+            return
         if args:
             # Use the XMLRPC response
             assert len(args) == 7
@@ -182,6 +231,8 @@ class Build(object):
             self.result = self._parse_build()
         if self._message in ('failed svn',):
             self.result = S_EXCEPTION
+        elif self.result == S_SUCCESS:
+            self.save()
 
     @classmethod
     def fromdump(cls, data):
@@ -198,6 +249,34 @@ class Build(object):
     def data(self):
         return self._data
 
+    def save(self):
+        if conn is None or self.saved:
+            return
+        if self.result not in (S_SUCCESS, S_FAILURE, S_EXCEPTION):
+            return False
+        conn.execute('insert into builds(builder, build, revision, result, '
+                     'message) values (?, ?, ?, ?, ?)', (self.builder,
+                     self.num, self.revision, self.result, self._message))
+        if self.failed_tests:
+            lines = ((self.builder, self.num, test)
+                     for test in self.failed_tests)
+            conn.executemany('insert into failures(builder, build, failed) '
+                             'values (?, ?, ?)', lines)
+        self.saved = True
+        return True
+
+    def _load_build(self):
+        # retrieve revision, result and message
+        result = None
+        if conn is not None and self.num > 0:
+            row = conn.execute('select revision, result, message from builds'
+                               ' where builder = ? and build = ?',
+                               (self.builder, self.num)).fetchone()
+            if row is not None:
+                self.saved = True
+                (self.revision, result, self._message) = row
+        return result
+
     def _parse_build(self):
         # retrieve num, result, revision and message
         build_page = urlread(self.url)
@@ -213,6 +292,7 @@ class Build(object):
         match = RE_BUILD_REVISION.search(build_page)
         if match:
             self.revision = int(match.group(1))
+        self._load_build()
         return result
 
     def _parse_stdio(self):
@@ -274,10 +354,16 @@ class Build(object):
     def get_message(self):
         if self.result in (S_SUCCESS, S_BUILDING):
             return self.result
+        if self.saved and conn is not None:
+            cur = conn.execute('select failed from failures where '
+                               'builder = ? and build = ?',
+                               (self.builder, self.num))
+            self.failed_tests = [test for (test,) in cur.fetchall()]
         else:
             if self._message is None or 'test' in self._message:
                 # Parse stdio on demand
                 self._parse_stdio()
+            self.save()
         msg = self._message
         if self.failed_tests:
             count_failed = len(self.failed_tests)
@@ -298,6 +384,33 @@ class Build(object):
         Convert the object in an easy-serializable dict.
         """
         return dict(num=self.num, data=self.data)
+
+
+def load_database():
+    global conn
+    if conn is None:
+        conn = sqlite3.connect(':memory:')
+    if os.path.exists(dbfile):
+        with open(dbfile, 'rb') as f:
+            conn.executescript(f.read())
+    else:
+        conn.execute('create table builders'
+                     '(builder, host, branch, lastbuild, status)')
+        conn.execute('create table builds(builder, build, revision, result, message)')
+        conn.execute('create table failures(builder, build, failed)')
+
+
+def dump_database():
+    if conn is None:
+        return
+    # Backup previous dump (and overwrite existing backup)
+    if os.path.exists(dbfile):
+        shutil.move(dbfile, dbfile + '.bak')
+    # Dump the database
+    with open(dbfile, 'wb') as f:
+        f.writelines(l + os.linesep for l in conn.iterdump())
+    # Close the connection
+    conn.close()
 
 
 def print_builder(name, builds, quiet):
@@ -410,10 +523,18 @@ def parse_args():
                       metavar='test_xyz', help='the name of a failed test')
     parser.add_option('-q', '--quiet', default=0, action='count',
                       help='one line per builder, or group by status with -qq')
+    parser.add_option('-o', '--offline', default=False, action='store_true',
+                      help='use the local database')
     parser.add_option('--no-color', default=False, action='store_true',
                       help='do not color the output')
+    parser.add_option('--no-database', default=False, action='store_true',
+                      help='do not cache the result in a database file')
 
     options, args = parser.parse_args()
+
+    if options.offline and options.no_database:
+        print "--offline and --no-database don't go together"
+        sys.exit(1)
 
     if options.failures:
         # ignore the -q option
@@ -428,13 +549,22 @@ def parse_args():
 
 
 def main():
+    global conn
+
     options, args = parse_args()
 
-    # create the xmlrpc proxy to retrieve the build data
-    proxy = xmlrpclib.ServerProxy(baseurl + 'all/xmlrpc')
+    if not options.no_database:
+        # Load the database
+        load_database()
 
-    # create the list of builders
-    builders = (Builder(name) for name in proxy.getAllBuilders())
+    if options.offline:
+        builders = Builder.query_all()
+    else:
+        # create the xmlrpc proxy to retrieve the build data
+        proxy = xmlrpclib.ServerProxy(baseurl + 'all/xmlrpc')
+
+        # create the list of builders
+        builders = (Builder(name) for name in proxy.getAllBuilders())
 
     # sort by branch and name
     builders = sorted(builders, key=lambda b: (b.branch, str(b)))
@@ -478,8 +608,9 @@ def main():
 
     # Retrieve the last builds
     xrlastbuilds = {}
-    for xrb in proxy.getLastBuildsAllBuilders(numbuilds):
-        xrlastbuilds.setdefault(xrb[0], []).append(xrb)
+    if not options.offline:
+        for xrb in proxy.getLastBuildsAllBuilders(numbuilds):
+            xrlastbuilds.setdefault(xrb[0], []).append(xrb)
 
     if options.failures:
         print "... retrieving build results"
@@ -499,9 +630,19 @@ def main():
         # default value is True without "-f" option
         found_failure = not options.failures
 
+        if options.offline:
+            offset = 1 + builder.lastbuild
+        else:
+            offset = 0
+
         builds = []
         for build_info in lastbuilds:
+            if offset and build_info[1] < 0:
+                build_info = (build_info[0], build_info[1] + offset)
             build = Build(*build_info)
+
+            if not offset and build_info[1] < 0 and build.saved:
+                offset = build.num - build_info[1]
 
             if not found_failure:
                 # Retrieve the failed tests
@@ -532,6 +673,12 @@ def main():
     if options.quiet > 1:
         print_status(groups)
 
+    if options.offline and conn is not None:
+        # In offline mode, there's no need to refresh the dump.
+        # The database is simply unloaded.
+        conn.close()
+        conn = None
+
     print_final(counters)
 
     return builders
@@ -543,3 +690,4 @@ if __name__ == '__main__':
         builders = main()
     finally:
         reset_terminal()
+        dump_database()
