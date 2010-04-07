@@ -74,7 +74,7 @@ def _prepare_output():
     default_fg = DEFAULT_OUTPUT['foreground'].lower()
     default_bg = DEFAULT_OUTPUT['background'].lower()
     _base = '\x1b[1;' if ('bold' in default_fg) else '\x1b['
-    fg_offset =  90 if ('bright' in default_fg) else 30
+    fg_offset = 90 if ('bright' in default_fg) else 30
     bg_offset = 100 if ('bright' in default_bg) else 40
     fg_color = next((fg_offset + idx for (idx, color) in enumerate(ANSI_COLOR)
                      if color in default_fg), 39)
@@ -396,8 +396,10 @@ def load_database():
     else:
         conn.execute('create table builders'
                      '(builder, host, branch, lastbuild, status)')
-        conn.execute('create table builds(builder, build, revision, result, message)')
-        conn.execute('create table failures(builder, build, failed)')
+        conn.execute('create table builds'
+                     '(builder, build, revision, result, message)')
+        conn.execute('create table failures'
+                     '(builder, build, failed)')
 
 
 def dump_database():
