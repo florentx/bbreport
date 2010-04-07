@@ -20,8 +20,8 @@ MSG_MAXLENGTH = 60
 DEFAULT_OUTPUT = {
     # keywords: <ansi color>, bright, bold
     # use an empty string to preserve terminal settings
-    'foreground': 'white bright',
-    'background': 'black',
+    'foreground': '',       # example: white bright
+    'background': '',       # example: black
     # set to False to disable colors
     'color': True,
 }
@@ -516,7 +516,7 @@ def parse_args():
                       metavar='NAME', help='buildbot name')
     parser.add_option('-b', '--branches', dest='branches', default=None,
                       metavar='BRANCHES',
-                      help='the Python branches (e.g. 2.6,3.1)')
+                      help='the Python branches (e.g. trunk,3.1,3.x)')
     parser.add_option('-u', '--build', dest='build', default=None,
                       metavar='num', help='the build number of a buildslave'
                                           ' (not implemented)')
@@ -595,7 +595,10 @@ def main():
         selected_builders = [builder for builder in selected_builders
                              if re.match(pattern, builder.name, re.I)]
 
-    print 'Selected builders:', len(selected_builders), '/', len(builders)
+    branches = sorted(set(b.branch for b in selected_builders))
+    print 'Selected builders:', len(selected_builders), '/', len(builders),
+    print '(branch%s: %s)' % ('es' if len(branches) > 1 else '',
+                              ', '.join(branches))
 
     if options.quiet > 1:
         # For the "-qq" option, 2 builds per builder is enough
