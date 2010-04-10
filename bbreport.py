@@ -672,6 +672,11 @@ def main():
 
     # loop through the builders and their builds
     for builder in selected_builders:
+
+        # These data are accumulated in a list of results which is
+        # passed to a printer function.  The same list may be used
+        # to generate other kind of reports (e.g. HTML, XML, ...).
+
         if options.offline:
             builds = builder.get_lastbuilds(numbuilds)
         else:
@@ -680,27 +685,12 @@ def main():
 
             builds = list(builder.get_builds(numbuilds, *xmlrpcbuilds))
 
-        # default value is True without "-f" option
-        found_failure = not options.failures
-
-        for build in builds:
-            if build is None:
-                # missing build
+        if options.failures:
+            if not any(build is not None and build.failed_tests and
+                       set(options.failures) <= set(build.failed_tests)
+                       for build in builds):
+                # no build matched the options.failures
                 continue
-
-            if not found_failure:
-                # Retrieve the failed tests
-                build.get_message()
-                if set(options.failures) <= set(build.failed_tests):
-                    found_failure = True
-
-            # These data are accumulated in a list of results which is
-            # passed to a printer function.  The same list may be used
-            # to generate other kind of reports (e.g. HTML, XML, ...).
-
-        if not found_failure:
-            # no build matched the options.failures
-            continue
 
         builder_status = print_builder(str(builder), builds,
                                        quiet=options.quiet)
