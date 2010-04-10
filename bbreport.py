@@ -462,7 +462,8 @@ def print_builder(name, builds, quiet):
     for build in builds:
         compact = (quiet or len(builds) > 6) and len(capsule) > 1
         if build is None:
-            capsule.append(' ' * (5 if not compact else 3))
+            if len(capsule) < NUMBUILDS:
+                capsule.append(' ' * (5 if not compact else 3))
             continue
 
         result = build.result
@@ -565,6 +566,9 @@ def parse_args():
     parser.add_option('-f', '--failures', dest='failures',
                       action='append', default=[],
                       metavar='test_xyz', help='the name of a failed test')
+    parser.add_option('-l', '--limit', default=0, type="int",
+                      help='limit the number of builds per builder '
+                           '(default: 6)')
     parser.add_option('-q', '--quiet', default=0, action='count',
                       help='one line per builder, or group by status with -qq')
     parser.add_option('-o', '--offline', default=False, action='store_true',
@@ -653,16 +657,18 @@ def main():
         numbuilds = 2
         groups = dict((s, []) for s in BUILDER_STATUSES)
         print "... retrieving last build results"
-    elif not options.quiet and len(selected_builders) < 3:
+    elif not options.limit and not options.quiet and len(selected_builders) < 3:
         # show more builds
         numbuilds = NUMBUILDS * 2
     else:
-        numbuilds = NUMBUILDS
+        numbuilds = options.limit or NUMBUILDS
 
     # Retrieve the last builds
     xrlastbuilds = {}
     if not options.offline:
-        for xrb in proxy.getLastBuildsAllBuilders(numbuilds):
+        # don't overload the server with huge requests.
+        limit = min(NUMBUILDS * 2, numbuilds)
+        for xrb in proxy.getLastBuildsAllBuilders(limit):
             xrlastbuilds.setdefault(xrb[0], []).append(xrb)
 
     if options.failures:
@@ -685,12 +691,12 @@ def main():
 
             builds = list(builder.get_builds(numbuilds, *xmlrpcbuilds))
 
-        if options.failures:
-            if not any(build is not None and build.failed_tests and
-                       set(options.failures) <= set(build.failed_tests)
-                       for build in builds):
-                # no build matched the options.failures
-                continue
+        if (options.failures and
+            not any(build is not None and build.failed_tests and
+                    set(options.failures) <= set(build.failed_tests)
+                    for build in builds)):
+            # no build matched the options.failures
+            continue
 
         builder_status = print_builder(str(builder), builds,
                                        quiet=options.quiet)
