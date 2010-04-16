@@ -152,30 +152,43 @@ class Builder(object):
         return dict((name, cls(name)) for (name,) in cur.fetchall())
 
     def get_builds(self, n, *builds):
-        newbuilds = []
-        for i in range(n - len(builds)):
-            build = Build(self.name, -1 - i)
-            if build.num == self.lastbuild:
-                for build in self.get_lastbuilds(n - i):
-                    yield build
-                break
-            newbuilds.append(build)
-            yield build
-        else:
+        if builds:
+            # The list is not empty.  Maybe the first build is missing.
+            if len(builds) < n:
+                last = Build(self.name, -1)
+                if last.num != builds[-1][1]:
+                    self.add(last)
+                    yield last
+                    n -= 1
             for build_info in reversed(builds):
                 build = Build(*build_info)
                 self.add(build)
                 yield build
-        self.add(*newbuilds)
+            n -= len(builds)
+            offset = build.num - 1
+        else:
+            # The list is empty.  Retrieve the builds by number (-1, -2, ...).
+            offset = -1
+        for i in range(n):
+            num = offset - i
+            build = Build(self.name, num)
+            if offset < 0 < build.num:
+                # use the real build numbers
+                offset = build.num + i
+            self.add(build)
+            yield build
+            # Reach the build #0? stop
+            if num == 0:
+                return
 
-    def get_lastbuilds(self, n):
+    def get_saved_builds(self, n):
         if conn is None:
             return []
         cur = conn.execute('select build from builds where builder = ? '
                            'order by build desc limit ?', (self.name, n))
         builds = [Build(self.name, num) for (num,) in cur.fetchall()]
         self.add(*builds)
-        return builds + [None] * (n - len(builds))
+        return builds
 
     def __eq__(self, other):
         return str(self) == str(other)
@@ -250,7 +263,7 @@ class Build(object):
         self.save()
 
     def _get_build(self, buildnum, args):
-        if buildnum:
+        if buildnum is not None:
             # Query the database
             self.result = self._load_build()
         if self.result:
@@ -316,7 +329,7 @@ class Build(object):
     def _load_build(self):
         # retrieve revision, result and message
         result = None
-        if conn is not None and self.num > 0:
+        if conn is not None and self.num >= 0:
             row = conn.execute('select revision, result, message from builds'
                                ' where builder = ? and build = ?',
                                (self.builder, self.num)).fetchone()
@@ -613,10 +626,10 @@ def main():
 
         # create the list of builders
         current_builders = set(proxy.getAllBuilders())
-        cached_builders = set(builders.keys())
+        saved_builders = set(builders.keys())
 
-        missing_builders = cached_builders - current_builders
-        added_builders = current_builders - cached_builders
+        missing_builders = saved_builders - current_builders
+        added_builders = current_builders - saved_builders
 
         # flag the obsolete builders
         for name in missing_builders:
@@ -663,11 +676,11 @@ def main():
         numbuilds = 2
         groups = dict((s, []) for s in BUILDER_STATUSES)
         print "... retrieving last build results"
-    elif not options.limit and not options.quiet and len(selected_builders) < 3:
+    elif options.quiet or options.limit or len(selected_builders) > 2:
+        numbuilds = options.limit or NUMBUILDS
+    else:
         # show more builds
         numbuilds = NUMBUILDS * 2
-    else:
-        numbuilds = options.limit or NUMBUILDS
 
     # Retrieve the last builds
     xrlastbuilds = {}
@@ -690,12 +703,16 @@ def main():
         # to generate other kind of reports (e.g. HTML, XML, ...).
 
         if options.offline:
-            builds = builder.get_lastbuilds(numbuilds)
+            # Read the cached builds
+            builds = builder.get_saved_builds(numbuilds)
         else:
             # If the builder is working, the list may be partial or empty.
             xmlrpcbuilds = xrlastbuilds.get(str(builder), [])
 
             builds = list(builder.get_builds(numbuilds, *xmlrpcbuilds))
+
+        # fill the build list with None for missing builds.
+        builds.extend([None] * (numbuilds - len(builds)))
 
         if (options.failures and
             not any(build is not None and build.failed_tests and
