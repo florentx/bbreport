@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 import sys
 import xmlrpclib
+import collections
 
 __version__ = '0.1dev'
 
@@ -483,98 +484,164 @@ def dump_database():
     conn.close()
 
 
-def print_builder(name, builds, quiet):
+class AbstractOutput:
+    def __init__(self, options):
+        self.options = options
 
-    count = {S_SUCCESS: 0, S_FAILURE: 0}
-    capsule = []
-    failed_builds = []
+    def add_builds(self, name, builds):
+        # name: builder name (str)
+        # builds: list of Build objects
+        pass
 
-    for build in builds:
-        compact = (quiet or len(builds) > 6) and len(capsule) > 1
-        if build is None:
-            if len(capsule) < NUMBUILDS:
-                capsule.append(' ' * (5 if not compact else 3))
-            continue
+    def display(self):
+        pass
 
-        result = build.result
+    def display_final(self):
+        pass
 
-        if build.revision:
-            revision = '%5d' % build.revision
-            rev = revision if not compact else revision[-3:]
+
+class BuilderOutput(AbstractOutput):
+    def __init__(self, options):
+        AbstractOutput.__init__(self, options)
+        self.counters = dict((s, 0) for s in BUILDER_STATUSES)
+        self.groups = dict((s, []) for s in BUILDER_STATUSES)
+
+    def print_builder(self, name, builds):
+        quiet = self.options.quiet
+
+        count = {S_SUCCESS: 0, S_FAILURE: 0}
+        capsule = []
+        failed_builds = []
+
+        for build in builds:
+            compact = (quiet or len(builds) > 6) and len(capsule) > 1
+            if build is None:
+                if len(capsule) < NUMBUILDS:
+                    capsule.append(' ' * (5 if not compact else 3))
+                continue
+
+            result = build.result
+
+            if build.revision:
+                revision = '%5d' % build.revision
+                rev = revision if not compact else revision[-3:]
+            else:
+                rev = ' *** ' if not compact else '***'
+            capsule.append(cformat(rev, result, sep=''))
+
+            if result == S_BUILDING:
+                continue
+            elif result == S_SUCCESS:
+                count[S_SUCCESS] += 1
+            else:
+                count[S_FAILURE] += 1
+                failed_builds.append(build)
+
+        if quiet > 1:
+            # Print only the colored buildbot names
+            if 0 == count[S_SUCCESS] == count[S_FAILURE]:
+                return S_OFFLINE
+            last_result = builds[0].result
+            if last_result in (S_SUCCESS, S_BUILDING):
+                return last_result
+            return S_FAILURE
+
+        if count[S_SUCCESS] == 0:
+            if count[S_FAILURE] == 0:
+                builder_status = S_OFFLINE
+                capsule = [cformat(' *** ', S_OFFLINE, sep='')] * 2
+            else:
+                builder_status = S_FAILURE
+        elif count[S_FAILURE] > 0:
+            builder_status = S_UNSTABLE
         else:
-            rev = ' *** ' if not compact else '***'
-        capsule.append(cformat(rev, result, sep=''))
+            builder_status = S_SUCCESS
 
-        if result == S_BUILDING:
-            continue
-        elif result == S_SUCCESS:
-            count[S_SUCCESS] += 1
-        else:
-            count[S_FAILURE] += 1
-            failed_builds.append(build)
+        print cformat('%-26s' % name, builder_status), ', '.join(capsule),
 
-    if quiet > 1:
-        # Print only the colored buildbot names
-        if 0 == count[S_SUCCESS] == count[S_FAILURE]:
-            return S_OFFLINE
-        last_result = builds[0].result
-        if last_result in (S_SUCCESS, S_BUILDING):
-            return last_result
-        return S_FAILURE
-
-    if count[S_SUCCESS] == 0:
-        if count[S_FAILURE] == 0:
-            builder_status = S_OFFLINE
-            capsule = [cformat(' *** ', S_OFFLINE, sep='')] * 2
-        else:
-            builder_status = S_FAILURE
-    elif count[S_FAILURE] > 0:
-        builder_status = S_UNSTABLE
-    else:
-        builder_status = S_SUCCESS
-
-    print cformat('%-26s' % name, builder_status), ', '.join(capsule),
-
-    if quiet and failed_builds:
-        # Print last failure or error.
-        build = failed_builds[0]
-        msg = build.get_message()
-        if len(msg) > MSG_MAXLENGTH:
-            msg = msg[:MSG_MAXLENGTH - 3] + '...'
-        print SYMBOL[build.result], msg
-    else:
-        # Move to next line
-        print
-
-    if not quiet:
-        for build in failed_builds:
+        if quiet and failed_builds:
+            # Print last failure or error.
+            build = failed_builds[0]
             msg = build.get_message()
-            print ' %5d:' % build.revision, SYMBOL[build.result], msg
+            if len(msg) > MSG_MAXLENGTH:
+                msg = msg[:MSG_MAXLENGTH - 3] + '...'
+            print SYMBOL[build.result], msg
+        else:
+            # Move to next line
+            print
 
-    return builder_status
+        if not quiet:
+            for build in failed_builds:
+                msg = build.get_message()
+                print ' %5d:' % build.revision, SYMBOL[build.result], msg
+
+        return builder_status
+
+    def add_builds(self, name, builds):
+        builder_status = self.print_builder(name, builds)
+
+        if self.options.quiet > 1:
+            self.groups[builder_status].append(name)
+
+        self.counters[builder_status] += 1
+
+    def display(self):
+        if self.options.quiet <= 1:
+            return
+        for status in BUILDER_STATUSES:
+            names = self.groups[status]
+            if not names:
+                continue
+            platforms = {}
+            for name in names:
+                host, branch = name.rsplit(None, 1)
+                platforms.setdefault(host, []).append(branch)
+
+            print cformat(status.title() + ':', status)
+            for host, branches in sorted(platforms.items()):
+                print '\t' + cformat(host, status), ', '.join(branches)
+
+    def display_final(self):
+        totals = []
+        for status in BUILDER_STATUSES:
+            if self.counters[status]:
+                totals.append(cformat(self.counters[status], status, sep=':'))
+        print 'Totals:', ' + '.join(totals),
 
 
-def print_status(groups):
-    for status in BUILDER_STATUSES:
-        names = groups[status]
-        if not names:
-            continue
-        platforms = {}
-        for name in names:
-            host, branch = name.rsplit(None, 1)
-            platforms.setdefault(host, []).append(branch)
+class Revision:
+    def __init__(self):
+        self.by_status = collections.defaultdict(list)
 
-        print cformat(status.title() + ':', status)
-        for host, branches in sorted(platforms.items()):
-            print '\t' + cformat(host, status), ', '.join(branches)
+class RevisionOutput(AbstractOutput):
+    def __init__(self, options):
+        AbstractOutput.__init__(self, options)
+        self.revisions = {}
 
+    def add_builds(self, name, builds):
+        for build in builds:
+            if build is None:
+                continue
+            if build.revision == 0:
+                continue
+            try:
+                revision = self.revisions[build.revision]
+            except KeyError:
+                revision = Revision()
+                self.revisions[build.revision] = revision
+            revision.by_status[build.result].append(name)
 
-def print_final(counts):
-    totals = []
-    for status in BUILDER_STATUSES:
-        if counts[status]:
-            totals.append(cformat(counts[status], status, sep=':'))
-    print 'Totals:', ' + '.join(totals),
+    def display(self):
+        revisions = self.revisions.items()
+        revisions.sort(key=lambda (key, value): key)
+        for number, revision in revisions:
+            results = ', '.join(
+                '%s={%s}' % (cformat(key, key), ', '.join(values))
+                for key, values in revision.by_status.iteritems())
+            print "%s: %s" % (number, results)
+
+    def display_final(self):
+        pass
 
 
 def parse_args():
@@ -607,6 +674,9 @@ def parse_args():
                       help='do not color the output')
     parser.add_option('--no-database', default=False, action='store_true',
                       help='do not cache the result in a database file')
+    parser.add_option('--mode', default="builder", type="choice",
+                      choices=("builder", "revision"),
+                      help='output mode: "builder" or "revision"')
 
     options, args = parser.parse_args()
 
@@ -690,7 +760,6 @@ def main():
     if options.quiet > 1:
         # For the "-qq" option, 2 builds per builder is enough
         numbuilds = 2
-        groups = dict((s, []) for s in BUILDER_STATUSES)
         print "... retrieving last build results"
     elif options.quiet or options.limit or len(selected_builders) > 2:
         numbuilds = options.limit or NUMBUILDS
@@ -709,9 +778,12 @@ def main():
     if options.failures:
         print "... retrieving build results"
 
-    counters = dict((s, 0) for s in BUILDER_STATUSES)
-
     # loop through the builders and their builds
+    if options.mode == "revision":
+        output_class = RevisionOutput
+    else:
+        output_class = BuilderOutput
+    output = output_class(options)
     for builder in selected_builders:
 
         # These data are accumulated in a list of results which is
@@ -737,16 +809,9 @@ def main():
             # no build matched the options.failures
             continue
 
-        builder_status = print_builder(str(builder), builds,
-                                       quiet=options.quiet)
+        output.add_builds(str(builder), builds)
 
-        if options.quiet > 1:
-            groups[builder_status].append(str(builder))
-
-        counters[builder_status] += 1
-
-    if options.quiet > 1:
-        print_status(groups)
+    output.display()
 
     if options.offline and conn is not None:
         # In offline mode, there's no need to refresh the dump.
@@ -754,7 +819,7 @@ def main():
         conn.close()
         conn = None
 
-    print_final(counters)
+    output.display_final()
 
     return conn, builders
 
