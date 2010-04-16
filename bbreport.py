@@ -4,6 +4,7 @@ import re
 import urllib
 import urllib2
 import fnmatch
+import gzip
 import optparse
 import os
 import shutil
@@ -30,8 +31,11 @@ ANSI_COLOR = ('black', 'red', 'green', 'yellow',
 
 baseurl = 'http://www.python.org/dev/buildbot/'
 
-# Database global objects
-dbfile = os.path.splitext(__file__)[0] + '.sqlite'
+# Database file
+dbfile = os.path.splitext(__file__)[0] + '.cache'
+# Old location (deprecated)
+legacy_dbfile = os.path.splitext(dbfile)[0] + '.sqlite'
+# Database connection
 conn = None
 
 # Common statuses for Builds and Builders
@@ -439,12 +443,22 @@ class Build(object):
         return dict(num=self.num, data=self.data)
 
 
+def upgrade_dbfile():
+    if os.path.exists(legacy_dbfile) and not os.path.exists(dbfile):
+        with gzip.open(dbfile, 'wb') as out, \
+             open(legacy_dbfile, 'rb') as in_:
+            out.write(in_.read())
+        os.unlink(legacy_dbfile)
+
+
 def load_database():
+    # Upgrade the database file format
+    upgrade_dbfile()
     global conn
     if conn is None:
         conn = sqlite3.connect(':memory:')
     if os.path.exists(dbfile):
-        with open(dbfile, 'rb') as f:
+        with gzip.open(dbfile, 'rb') as f:
             conn.executescript(f.read())
     else:
         # Initialize the tables
@@ -463,7 +477,7 @@ def dump_database():
     if os.path.exists(dbfile):
         shutil.move(dbfile, dbfile + '.bak')
     # Dump the database
-    with open(dbfile, 'wb') as f:
+    with gzip.open(dbfile, 'wb') as f:
         f.writelines(l + os.linesep for l in conn.iterdump())
     # Close the connection
     conn.close()
@@ -584,7 +598,7 @@ def parse_args():
                       metavar='test_xyz', help='the name of a failed test')
     parser.add_option('-l', '--limit', default=0, type="int",
                       help='limit the number of builds per builder '
-                           '(default: 6)')
+                           '(default: %s)' % NUMBUILDS)
     parser.add_option('-q', '--quiet', default=0, action='count',
                       help='one line per builder, or group by status with -qq')
     parser.add_option('-o', '--offline', default=False, action='store_true',
