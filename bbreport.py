@@ -618,7 +618,7 @@ def parse_args():
         # ignore the -q option
         options.quiet = 0
 
-    if options.no_color:
+    if options.no_color or not sys.stdout.isatty():
         # replace the colorizer
         cformat = _cformat_plain
 
