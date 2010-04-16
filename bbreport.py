@@ -164,6 +164,8 @@ class Builder(object):
                 build = Build(*build_info)
                 self.add(build)
                 yield build
+            if build.num == 0:
+                return
             n -= len(builds)
             offset = build.num - 1
         else:
