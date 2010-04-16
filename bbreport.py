@@ -144,11 +144,12 @@ class Builder(object):
 
     @classmethod
     def query_all(cls):
+        # Return the builders from the database, as a dict
         if conn is None:
             return []
         cur = conn.execute('select builder from builders where status '
                            'is null or status <> ?', (S_MISSING,))
-        return [cls(name) for (name,) in cur.fetchall()]
+        return dict((name, cls(name)) for (name,) in cur.fetchall())
 
     def get_builds(self, n, *builds):
         newbuilds = []
@@ -611,17 +612,22 @@ def main():
         proxy = xmlrpclib.ServerProxy(baseurl + 'all/xmlrpc')
 
         # create the list of builders
-        current_builders = proxy.getAllBuilders()
+        current_builders = set(proxy.getAllBuilders())
+        cached_builders = set(builders.keys())
+
+        missing_builders = cached_builders - current_builders
+        added_builders = current_builders - cached_builders
 
         # flag the obsolete builders
-        if current_builders:
-            for build in builders[:]:
-                if build.name not in current_builders:
-                    build.set_status(S_MISSING)
-                    builders.remove(build)
+        for name in missing_builders:
+            builders.pop(name).set_status(S_MISSING)
+
+        # refresh the dict of builders
+        for name in added_builders:
+            builders[name] = Builder(name)
 
     # sort by branch and name
-    builders = sorted(builders, key=lambda b: (b.branch, str(b)))
+    builders = sorted(builders.values(), key=lambda b: (b.branch, str(b)))
 
     if options.branches:
         branches = options.branches.split(',')
