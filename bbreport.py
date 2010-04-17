@@ -12,6 +12,7 @@ import sqlite3
 import sys
 import xmlrpclib
 import collections
+from ConfigParser import ConfigParser
 
 __version__ = '0.1dev'
 
@@ -32,12 +33,18 @@ ANSI_COLOR = ('black', 'red', 'green', 'yellow',
 
 baseurl = 'http://www.python.org/dev/buildbot/'
 
+# Configuration
+basefile = os.path.splitext(__file__)[0]
+conffile = basefile + '.conf'
 # Database file
-dbfile = os.path.splitext(__file__)[0] + '.cache'
+dbfile = basefile + '.cache'
 # Old location (deprecated)
-legacy_dbfile = os.path.splitext(dbfile)[0] + '.sqlite'
+legacy_dbfile = basefile + '.sqlite'
+
 # Database connection
 conn = None
+# Known issues
+issues = []
 
 # Common statuses for Builds and Builders
 S_BUILDING = 'building'
@@ -249,6 +256,26 @@ class Builder(object):
         return dict(name=self.name, builds=builds)
 
 
+class MatchIssue(object):
+
+    def __init__(self, number, test='', message='', builder=''):
+        if not (test or message or builder):
+            raise Exception('MatchIssue needs a test or a message '
+                            'or a builder regex')
+        self.number = number
+        # Match the failed test exactly
+        if test and not test.endswith('$'):
+            test += '$'
+        self.test = re.compile(test)
+        self.message = re.compile(message)
+        self.builder = re.compile(builder)
+
+    def match(self, test, message, builder):
+        return all((self.test.match(test),
+                    self.message.match(message),
+                    self.builder.match(builder)))
+
+
 class Build(object):
     """
     Represent a single build of a builder.
@@ -424,17 +451,23 @@ class Build(object):
             return self.result
         msg = self._message
         if self.failed_tests:
-            count_failed = len(self.failed_tests)
-            if self.result == S_EXCEPTION and count_failed > 2:
+            failed_tests = []
+            for test in self.failed_tests:
+                issue = next((issue for issue in issues
+                              if issue.match(test, msg, self.builder)), None)
+                if issue:
+                    test += '`%s' % issue.number
+                failed_tests.append(test)
+            failed_count = len(failed_tests)
+            if self.result == S_EXCEPTION and failed_count > 2:
                 # disk full or other buildbot error
-                msg += ' (%s failed)' % count_failed
+                msg += ' (%s failed)' % failed_count
             elif msg:
                 # process killed: print last test
-                msg += ': ' + ' '.join(self.failed_tests)
+                msg += ': ' + ' '.join(failed_tests)
             else:
                 # test failures
-                msg = '%s failed: %s' % (count_failed,
-                                         ' '.join(self.failed_tests))
+                msg = '%s failed: %s' % (failed_count, ' '.join(failed_tests))
         return msg
 
     def asdict(self):
@@ -444,7 +477,21 @@ class Build(object):
         return dict(num=self.num, data=self.data)
 
 
+def load_configuration():
+    global issues
+
+    conf = ConfigParser()
+    conf.read(conffile)
+    if 'issues' not in conf.sections():
+        return
+    # Load the known issues
+    for num, rule in conf.items('issues'):
+        args = (arg.strip() for arg in rule.split(':'))
+        issues.append(MatchIssue(num, *args))
+
+
 def upgrade_dbfile():
+    # Now the database file is gzipped
     if os.path.exists(legacy_dbfile) and not os.path.exists(dbfile):
         with gzip.open(dbfile, 'wb') as out, \
              open(legacy_dbfile, 'rb') as in_:
@@ -700,6 +747,7 @@ def parse_args():
 def main():
     global conn
 
+    load_configuration()
     options, args = parse_args()
 
     if not options.no_database:
