@@ -117,6 +117,15 @@ def reset_terminal():
 cformat = _cformat_color
 
 
+def trunc(tests, length):
+    # Join test names and truncate
+    text = ' ' + ' '.join(tests)
+    length -= len(text)
+    if length < 0:
+        text = text[:length -3] + '...'
+    return text, length
+
+
 def urlread(url):
     try:
         resource = urllib2.urlopen(url, timeout=DEFAULT_TIMEOUT)
@@ -441,7 +450,7 @@ class Build(object):
             # No test failure: probably a buildbot error
             self.result = S_EXCEPTION
 
-    def get_message(self):
+    def get_message(self, length=2048):
         if self.result in (S_SUCCESS, S_BUILDING):
             return self.result
         msg = self._message
@@ -455,20 +464,21 @@ class Build(object):
                     test += '`%s' % issue.number
                     known.append(test)
                 else:
-                    test = cformat(test, S_FAILURE, sep='')
                     failed_tests.append(test)
-            failed_tests += known
-            failed_count = len(failed_tests)
+            failed_count = len(failed_tests) + len(known)
             if self.result == S_EXCEPTION and failed_count > 2:
                 # disk full or other buildbot error
                 msg += ' (%s failed)' % failed_count
-            elif msg:
-                # process killed: print last test
-                msg += ': ' + ' '.join(failed_tests)
             else:
-                # test failures
-                msg = '%s failed: %s' % (failed_count, ' '.join(failed_tests))
-        return msg
+                if not msg:
+                    msg = '%s failed' % failed_count
+                length -= len(msg)
+                if failed_tests:
+                    (text, length) = trunc(failed_tests, length)
+                    msg += cformat(text, S_FAILURE, sep='')
+                if known and not (failed_tests and length < 0):
+                    msg += trunc(known, length)[0]
+        return SYMBOL[self.result] + ' ' + msg
 
     def asdict(self):
         """
@@ -628,19 +638,14 @@ class BuilderOutput(AbstractOutput):
 
         if quiet and failed_builds:
             # Print last failure or error.
-            build = failed_builds[0]
-            msg = build.get_message()
-            if len(msg) > MSG_MAXLENGTH:
-                msg = msg[:MSG_MAXLENGTH - 3] + '...'
-            print SYMBOL[build.result], msg
+            print failed_builds[0].get_message(MSG_MAXLENGTH)
         else:
             # Move to next line
             print
 
         if not quiet:
             for build in failed_builds:
-                msg = build.get_message()
-                print ' %5d:' % build.revision, SYMBOL[build.result], msg
+                print ' %5d:' % build.revision, build.get_message()
 
         return builder_status
 
