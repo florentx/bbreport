@@ -483,24 +483,6 @@ class Build(object):
 def load_configuration():
     global ISSUES
 
-    ISSUES = (
-        MatchIssue(7443, test='test_linecache', builder='x86 Windows7 3.x|x86 XP-5 3.x'),
-        MatchIssue(8108, test='test_ftplib|test_ssl'),
-        MatchIssue(8405, test='test_os', builder='x86 XP-4 3.x'),
-        MatchIssue(8428, test='test_multiprocessing', message='^hung'),
-        MatchIssue(8429, test='test_subprocess', message='^hung'),
-        MatchIssue(8430, test='test_site', builder='AMD64 Ubuntu wide 3.x'),
-        MatchIssue(8431, test='test_tokenize|test_io', message='^hung'),
-        MatchIssue(8422, test='test_genericpath|test_macpath|test_ntpath|test_posixpath', builder='x86 Tiger 3.x'),
-        MatchIssue(8423, test='test_pep277', builder='x86 Tiger 3.x'),
-        MatchIssue(8424, test='test_signal', builder='x86 Tiger 3.x|x86 FreeBSD 7.2 3.x|x86 FreeBSD 3.x'),
-        # FIXME: match the function name: "test_send_signal"
-        MatchIssue(8432, test='test_subprocess', builder='x86 FreeBSD 3.x|x86 FreeBSD 7.2 3.x|x86 FreeBSD 3.x'),
-        MatchIssue(8433, test='test_curses', builder='sparc Debian 3.x|alpha Debian 3.x'),
-    )
-    return
-
-
     conf = ConfigParser()
     conf.read(conffile)
     if 'issues' not in conf.sections():
