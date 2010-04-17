@@ -48,6 +48,8 @@ S_UNSTABLE = 'unstable'     # Builder only (intermittent failures)
 S_OFFLINE = 'offline'       # Builder only
 S_MISSING = 'missing'       # Builder only
 
+KNOWN_ISSUE = 'known_issue'
+
 BUILDER_STATUSES = (S_BUILDING, S_SUCCESS, S_UNSTABLE, S_FAILURE, S_OFFLINE)
 
 # Regular expressions
@@ -74,7 +76,8 @@ SYMBOL = {'black': '.', 'red': '#', 'green': '_', 'yellow': '?', 'blue': '*'}
 
 _escape_sequence = {}
 _colors = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
-           S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'black'}
+           S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'black',
+           KNOWN_ISSUE: 'blue'}
 
 
 def prepare_output():
@@ -451,7 +454,7 @@ class Build(object):
                 issue = next((issue for issue in issues
                               if issue.match(test, msg, self.builder)), None)
                 if issue:
-                    test += '`%s' % issue.number
+                    test = cformat('%s`%s' % (test, issue.number), KNOWN_ISSUE)
                 failed_tests.append(test)
             failed_count = len(failed_tests)
             if self.result == S_EXCEPTION and failed_count > 2:
