@@ -484,7 +484,7 @@ def dump_database():
     conn.close()
 
 
-class AbstractOutput:
+class AbstractOutput(object):
     def __init__(self, options):
         self.options = options
 
@@ -613,6 +613,7 @@ class Revision:
     def __init__(self):
         self.by_status = collections.defaultdict(list)
 
+
 class RevisionOutput(AbstractOutput):
     def __init__(self, options):
         AbstractOutput.__init__(self, options)
@@ -711,19 +712,23 @@ def main():
         proxy = xmlrpclib.ServerProxy(baseurl + 'all/xmlrpc')
 
         # create the list of builders
+        # XXX: add a timeout
         current_builders = set(proxy.getAllBuilders())
         saved_builders = set(builders.keys())
 
-        missing_builders = saved_builders - current_builders
-        added_builders = current_builders - saved_builders
+        # Do nothing if the RPC call returns an empty set
+        if current_builders:
 
-        # flag the obsolete builders
-        for name in missing_builders:
-            builders.pop(name).set_status(S_MISSING)
+            missing_builders = saved_builders - current_builders
+            added_builders = current_builders - saved_builders
 
-        # refresh the dict of builders
-        for name in added_builders:
-            builders[name] = Builder(name)
+            # flag the obsolete builders
+            for name in missing_builders:
+                builders.pop(name).set_status(S_MISSING)
+
+            # refresh the dict of builders
+            for name in added_builders:
+                builders[name] = Builder(name)
 
     # sort by branch and name
     builders = sorted(builders.values(), key=lambda b: (b.branch, str(b)))
