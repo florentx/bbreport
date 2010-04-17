@@ -44,7 +44,7 @@ legacy_dbfile = basefile + '.sqlite'
 # Database connection
 conn = None
 # Known issues
-issues = []
+ISSUES = []
 
 # Common statuses for Builds and Builders
 S_BUILDING = 'building'
@@ -56,6 +56,8 @@ S_OFFLINE = 'offline'       # Builder only
 S_MISSING = 'missing'       # Builder only
 
 BUILDER_STATUSES = (S_BUILDING, S_SUCCESS, S_UNSTABLE, S_FAILURE, S_OFFLINE)
+
+KNOWN_ISSUE_COLOR = 'known_issue'
 
 # Regular expressions
 RE_BUILD = re.compile('Build #(\d+)</h1>\r?\n?'
@@ -80,7 +82,8 @@ HTMLNOISE = '</span><span class="stdout">'
 SYMBOL = {'black': '.', 'red': '#', 'green': '_', 'yellow': '?', 'blue': '*'}
 
 _colors = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
-           S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'black'}
+           S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'black',
+           KNOWN_ISSUE_COLOR: 'blue'}
 
 
 def _prepare_output():
@@ -453,10 +456,10 @@ class Build(object):
         if self.failed_tests:
             failed_tests = []
             for test in self.failed_tests:
-                issue = next((issue for issue in issues
+                issue = next((issue for issue in ISSUES
                               if issue.match(test, msg, self.builder)), None)
                 if issue:
-                    test += '`%s' % issue.number
+                    test = cformat('%s`%s' % (test, issue.number), KNOWN_ISSUE_COLOR)
                 failed_tests.append(test)
             failed_count = len(failed_tests)
             if self.result == S_EXCEPTION and failed_count > 2:
@@ -478,7 +481,25 @@ class Build(object):
 
 
 def load_configuration():
-    global issues
+    global ISSUES
+
+    ISSUES = (
+        MatchIssue(7443, test='test_linecache', builder='x86 Windows7 3.x|x86 XP-5 3.x'),
+        MatchIssue(8108, test='test_ftplib|test_ssl'),
+        MatchIssue(8405, test='test_os', builder='x86 XP-4 3.x'),
+        MatchIssue(8428, test='test_multiprocessing', message='^hung'),
+        MatchIssue(8429, test='test_subprocess', message='^hung'),
+        MatchIssue(8430, test='test_site', builder='AMD64 Ubuntu wide 3.x'),
+        MatchIssue(8431, test='test_tokenize|test_io', message='^hung'),
+        MatchIssue(8422, test='test_genericpath|test_macpath|test_ntpath|test_posixpath', builder='x86 Tiger 3.x'),
+        MatchIssue(8423, test='test_pep277', builder='x86 Tiger 3.x'),
+        MatchIssue(8424, test='test_signal', builder='x86 Tiger 3.x|x86 FreeBSD 7.2 3.x|x86 FreeBSD 3.x'),
+        # FIXME: match the function name: "test_send_signal"
+        MatchIssue(8432, test='test_subprocess', builder='x86 FreeBSD 3.x|x86 FreeBSD 7.2 3.x|x86 FreeBSD 3.x'),
+        MatchIssue(8433, test='test_curses', builder='sparc Debian 3.x|alpha Debian 3.x'),
+    )
+    return
+
 
     conf = ConfigParser()
     conf.read(conffile)
@@ -487,7 +508,7 @@ def load_configuration():
     # Load the known issues
     for num, rule in conf.items('issues'):
         args = (arg.strip() for arg in rule.split(':'))
-        issues.append(MatchIssue(num, *args))
+        ISSUES.append(MatchIssue(num, *args))
 
 
 def upgrade_dbfile():
