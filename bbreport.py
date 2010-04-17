@@ -20,14 +20,7 @@ NUMBUILDS = 6
 DEFAULT_BRANCHES = 'all'
 DEFAULT_TIMEOUT = 2
 MSG_MAXLENGTH = 60
-DEFAULT_OUTPUT = {
-    # keywords: <ansi color>, bright, bold
-    # use an empty string to preserve terminal settings
-    'foreground': '',       # example: white bright
-    'background': '',       # example: black
-    # set to False to disable colors
-    'color': True,
-}
+DEFAULT_OUTPUT = {}
 ANSI_COLOR = ('black', 'red', 'green', 'yellow',
               'blue', 'magenta', 'cyan', 'white')
 
@@ -79,13 +72,16 @@ HTMLNOISE = '</span><span class="stdout">'
 # Format output
 SYMBOL = {'black': '.', 'red': '#', 'green': '_', 'yellow': '?', 'blue': '*'}
 
+_escape_sequence = {}
 _colors = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
            S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'black'}
 
 
-def _prepare_output():
-    default_fg = DEFAULT_OUTPUT['foreground'].lower()
-    default_bg = DEFAULT_OUTPUT['background'].lower()
+def prepare_output():
+    global cformat
+
+    default_fg = DEFAULT_OUTPUT.get('foreground', '').lower()
+    default_bg = DEFAULT_OUTPUT.get('background', '').lower()
     _base = '\x1b[1;' if ('bold' in default_fg) else '\x1b['
     fg_offset = 90 if ('bright' in default_fg) else 30
     bg_offset = 100 if ('bright' in default_bg) else 40
@@ -99,10 +95,9 @@ def _prepare_output():
         _escape_sequence[status] = '%s%s;%sm%%s\x1b[%sm' % \
             (_base, fg_offset + ANSI_COLOR.index(color), bg_color, fg_color)
 
-
-_escape_sequence = {}
-_prepare_output()
-del _colors, _prepare_output
+    if not sys.stdout.isatty() or (str(DEFAULT_OUTPUT.get('color')).lower() in
+                                   ('false', '0', 'off', 'no')):
+        cformat = _cformat_plain
 
 
 def _cformat_plain(text, color, sep=' '):
@@ -119,7 +114,7 @@ def reset_terminal():
         print '\x1b[39;49;00m',
     print
 
-cformat = _cformat_color if DEFAULT_OUTPUT['color'] else _cformat_plain
+cformat = _cformat_color
 
 
 def urlread(url):
@@ -482,7 +477,18 @@ def load_configuration():
 
     conf = ConfigParser()
     conf.read(conffile)
-    if 'issues' not in conf.sections():
+    sections = conf.sections()
+    if 'global' in sections:
+        glow = dict((k.lower(), k) for k in globals())
+        for k, v in conf.items('global'):
+            key = glow.get(k.lower())
+            if key:
+                globals()[key] = v
+    if 'output' in sections:
+        DEFAULT_OUTPUT.update(conf.items('output'))
+    # Prepare the output colors
+    prepare_output()
+    if 'issues' not in sections:
         return
     # Load the known issues
     for num, rule in conf.items('issues'):
@@ -745,7 +751,7 @@ def parse_args():
         # ignore the -q option
         options.quiet = 0
 
-    if options.no_color or not sys.stdout.isatty():
+    if options.no_color:
         # replace the colorizer
         cformat = _cformat_plain
 
