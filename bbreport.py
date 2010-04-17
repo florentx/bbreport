@@ -1,5 +1,6 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
+from __future__ import with_statement
 import re
 import urllib
 import urllib2
@@ -8,11 +9,13 @@ import gzip
 import optparse
 import os
 import shutil
+import socket
 import sqlite3
 import sys
 import xmlrpclib
 import collections
 from ConfigParser import ConfigParser
+from contextlib import closing
 
 __version__ = '0.1dev'
 
@@ -21,8 +24,8 @@ DEFAULT_BRANCHES = 'all'
 DEFAULT_TIMEOUT = 2
 MSG_MAXLENGTH = 60
 DEFAULT_OUTPUT = {}
-ANSI_COLOR = ('black', 'red', 'green', 'yellow',
-              'blue', 'magenta', 'cyan', 'white')
+ANSI_COLOR = ['black', 'red', 'green', 'yellow',
+              'blue', 'magenta', 'cyan', 'white']
 
 baseurl = 'http://www.python.org/dev/buildbot/'
 
@@ -76,6 +79,23 @@ _escape_sequence = {}
 _colors = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
            S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'black'}
 
+# Compatibility with Python 2.5
+if not hasattr(sqlite3.Connection, 'iterdump'):
+    try:
+        from pysqlite2 import dbapi2 as sqlite3
+        sqlite3.Connection.iterdump
+    except (ImportError, AttributeError):
+        sys.exit("*** Requires pysqlite 2.5.0 or Python >= 2.6")
+
+try:
+    next
+except NameError:
+
+    def next(iterator, default=None):
+        for item in iterator:
+            return item
+        return default
+
 
 def prepare_output():
     global cformat
@@ -122,13 +142,13 @@ def trunc(tests, length):
     text = ' ' + ' '.join(tests)
     length -= len(text)
     if length < 0:
-        text = text[:length -3] + '...'
+        text = text[:length - 3] + '...'
     return text, length
 
 
 def urlread(url):
     try:
-        resource = urllib2.urlopen(url, timeout=DEFAULT_TIMEOUT)
+        resource = urllib2.urlopen(url)
         return resource.read()
     except IOError:
         return ''
@@ -503,6 +523,7 @@ def load_configuration():
         DEFAULT_OUTPUT.update(conf.items('output'))
     # Prepare the output colors
     prepare_output()
+    socket.setdefaulttimeout(DEFAULT_TIMEOUT)
     if 'issues' not in sections:
         return
     # Load the known issues
@@ -514,12 +535,9 @@ def load_configuration():
 def upgrade_dbfile():
     # Now the database file is gzipped
     if os.path.exists(legacy_dbfile) and not os.path.exists(dbfile):
-        out = gzip.open(dbfile, 'wb')
-        try:
+        with closing(gzip.open(dbfile, 'wb')) as out:
             with open(legacy_dbfile, 'rb') as in_:
                 out.write(in_.read())
-        finally:
-            out.close()
         os.unlink(legacy_dbfile)
 
 
@@ -530,11 +548,8 @@ def load_database():
     if conn is None:
         conn = sqlite3.connect(':memory:')
     if os.path.exists(dbfile):
-        f = gzip.open(dbfile, 'rb')
-        try:
+        with closing(gzip.open(dbfile, 'rb')) as f:
             conn.executescript(f.read())
-        finally:
-            f.close()
     else:
         # Initialize the tables
         conn.execute('create table builders'
@@ -552,11 +567,8 @@ def dump_database():
     if os.path.exists(dbfile):
         shutil.move(dbfile, dbfile + '.bak')
     # Dump the database
-    f = gzip.open(dbfile, 'wb')
-    try:
+    with closing(gzip.open(dbfile, 'wb')) as f:
         f.writelines(l + os.linesep for l in conn.iterdump())
-    finally:
-        f.close()
     # Close the connection
     conn.close()
 
@@ -785,7 +797,6 @@ def main():
         proxy = xmlrpclib.ServerProxy(baseurl + 'all/xmlrpc')
 
         # create the list of builders
-        # XXX: add a timeout
         current_builders = set(proxy.getAllBuilders())
         saved_builders = set(builders.keys())
 
