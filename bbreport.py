@@ -493,9 +493,12 @@ def load_configuration():
 def upgrade_dbfile():
     # Now the database file is gzipped
     if os.path.exists(legacy_dbfile) and not os.path.exists(dbfile):
-        with gzip.open(dbfile, 'wb') as out, \
-             open(legacy_dbfile, 'rb') as in_:
-            out.write(in_.read())
+        out = gzip.open(dbfile, 'wb')
+        try:
+            with open(legacy_dbfile, 'rb') as in_:
+                out.write(in_.read())
+        finally:
+            out.close()
         os.unlink(legacy_dbfile)
 
 
@@ -506,8 +509,11 @@ def load_database():
     if conn is None:
         conn = sqlite3.connect(':memory:')
     if os.path.exists(dbfile):
-        with gzip.open(dbfile, 'rb') as f:
+        f = gzip.open(dbfile, 'rb')
+        try:
             conn.executescript(f.read())
+        finally:
+            f.close()
     else:
         # Initialize the tables
         conn.execute('create table builders'
@@ -525,8 +531,11 @@ def dump_database():
     if os.path.exists(dbfile):
         shutil.move(dbfile, dbfile + '.bak')
     # Dump the database
-    with gzip.open(dbfile, 'wb') as f:
+    f = gzip.open(dbfile, 'wb')
+    try:
         f.writelines(l + os.linesep for l in conn.iterdump())
+    finally:
+        f.close()
     # Close the connection
     conn.close()
 
