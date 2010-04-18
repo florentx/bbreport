@@ -782,7 +782,11 @@ def main():
 
             # refresh the dict of builders
             for name in added_builders:
-                builders[name] = Builder(name)
+                try:
+                    builders[name] = Builder(name)
+                except ValueError:
+                    # XXX exception raised on '2.6.dmg' and similar.
+                    pass
 
     # sort by branch and name
     builders = sorted(builders.values(), key=lambda b: (b.branch, str(b)))
