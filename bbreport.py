@@ -570,8 +570,6 @@ def dump_database():
     # Dump the database
     with closing(gzip.open(dbfile, 'wb')) as f:
         f.writelines(l + os.linesep for l in conn.iterdump())
-    # Close the connection
-    conn.close()
 
 
 class AbstractOutput(object):
@@ -789,8 +787,11 @@ def main():
     options, args = parse_args()
 
     if not options.no_database:
-        # Load the database
-        load_database()
+        try:
+            # Load the database
+            load_database()
+        except Exception:
+            conn = None
 
     builders = Builder.query_all()
     if not options.offline:
@@ -911,13 +912,13 @@ def main():
 
     output.display_final()
 
-    return conn, builders
+    return builders
 
 
 if __name__ == '__main__':
     try:
-        # set some global vars -- useful with python -i
-        (conn, builders) = main()
+        # set the builders var -- useful with python -i
+        builders = main()
     finally:
         reset_terminal()
         dump_database()
