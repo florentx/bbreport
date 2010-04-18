@@ -73,11 +73,11 @@ OSERRORS = ('filesystem is full',
 HTMLNOISE = '</span><span class="stdout">'
 
 # Format output
-SYMBOL = {'black': '.', 'red': '#', 'green': '_', 'yellow': '?', 'blue': '*'}
+SYMBOL = {'cyan': '.', 'red': '#', 'green': '_', 'yellow': '?', 'blue': '*'}
 
 _escape_sequence = {}
 _colors = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
-           S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'black'}
+           S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'cyan'}
 
 # Compatibility with Python 2.5
 if not hasattr(sqlite3.Connection, 'iterdump'):
