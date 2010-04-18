@@ -21,7 +21,7 @@ __version__ = '0.1dev'
 
 NUMBUILDS = 6
 DEFAULT_BRANCHES = 'all'
-DEFAULT_TIMEOUT = 2
+DEFAULT_TIMEOUT = 4
 MSG_MAXLENGTH = 60
 DEFAULT_OUTPUT = {}
 ANSI_COLOR = ['black', 'red', 'green', 'yellow',
