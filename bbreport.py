@@ -164,7 +164,15 @@ class Builder(object):
     def __init__(self, name):
         self.name = name
         # the branch name should always be the last part of the name
-        self.host, self.branch = name.rsplit(None, 1)
+        if name.endswith(".dmg"):
+            # FIXME: fix buildbot names? :-)
+            self.host = name
+            branch = name[:-4]
+            if branch == u'2.7':
+                branch = u'trunk'
+            self.branch = branch
+        else:
+            self.host, self.branch = name.rsplit(None, 1)
         self.url = baseurl + 'builders/' + urllib.quote(name)
         self.builds = {}
         self._load_builder()
