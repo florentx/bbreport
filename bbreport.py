@@ -73,11 +73,13 @@ OSERRORS = ('filesystem is full',
 HTMLNOISE = '</span><span class="stdout">'
 
 # Format output
-SYMBOL = {'cyan': '.', 'red': '#', 'green': '_', 'yellow': '?', 'blue': '*'}
+SYMBOL = {S_SUCCESS: '_', S_FAILURE: '#', S_EXCEPTION: '?',
+          S_UNSTABLE: '?', S_BUILDING: '*', S_OFFLINE: '*'}
+
+COLOR = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
+         S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'cyan'}
 
 _escape_sequence = {}
-_colors = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
-           S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'cyan'}
 
 # Compatibility with Python 2.5
 if not hasattr(sqlite3.Connection, 'iterdump'):
@@ -110,8 +112,7 @@ def prepare_output():
     bg_color = next((bg_offset + idx for (idx, color) in enumerate(ANSI_COLOR)
                      if color in default_bg), 49)
 
-    for status, color in _colors.items():
-        SYMBOL[status] = SYMBOL[color]
+    for status, color in COLOR.items():
         _escape_sequence[status] = '%s%s;%sm%%s\x1b[%sm' % \
             (_base, fg_offset + ANSI_COLOR.index(color), bg_color, fg_color)
 
@@ -120,12 +121,12 @@ def prepare_output():
         cformat = _cformat_plain
 
 
-def _cformat_plain(text, color, sep=' '):
-    return sep.join((SYMBOL[color], str(text)))
+def _cformat_plain(text, status, sep=' '):
+    return sep.join((SYMBOL[status], str(text)))
 
 
-def _cformat_color(text, color, sep=None):
-    return _escape_sequence[color] % text
+def _cformat_color(text, status, sep=None):
+    return _escape_sequence[status] % text
 
 
 def reset_terminal():
@@ -505,6 +506,10 @@ def load_configuration():
                 globals()[key] = v
     if 'output' in sections:
         DEFAULT_OUTPUT.update(conf.items('output'))
+    if 'colors' in sections:
+        COLOR.update(conf.items('colors'))
+    if 'symbols' in sections:
+        SYMBOL.update(conf.items('symbols'))
     # Prepare the output colors
     prepare_output()
     socket.setdefaulttimeout(DEFAULT_TIMEOUT)
