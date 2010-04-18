@@ -492,6 +492,7 @@ class Build(object):
             else:
                 if not msg:
                     msg = '%s failed' % failed_count
+                msg += ':'
                 length -= len(msg)
                 if failed_tests:
                     (text, length) = trunc(failed_tests, length)
