@@ -172,13 +172,6 @@ class Builder(object):
             self.save()
 
     @classmethod
-    def fromdump(cls, data):
-        """
-        Alternate constructor to create the object from a serialized builder.
-        """
-        pass
-
-    @classmethod
     def query_all(cls):
         # Return the builders from the database, as a dict
         if conn is None:
@@ -271,14 +264,6 @@ class Builder(object):
             self.saved = True
         return True
 
-    def asdict(self):
-        """
-        Convert the object in an easy-serializable dict.
-        """
-        builds = dict((num, build.asdict())
-                      for num, build in self.builds.iteritems())
-        return dict(name=self.name, builds=builds)
-
 
 class MatchIssue(object):
 
@@ -352,13 +337,6 @@ class Build(object):
             if self._message is None or 'test' in self._message:
                 # Parse stdio on demand
                 self._parse_stdio()
-
-    @classmethod
-    def fromdump(cls, data):
-        """
-        Alternate constructor to create the object from a serialized builder.
-        """
-        pass
 
     @property
     def url(self):
@@ -501,12 +479,6 @@ class Build(object):
                     msg += trunc(known, length)[0]
         return SYMBOL[self.result] + ' ' + msg
 
-    def asdict(self):
-        """
-        Convert the object in an easy-serializable dict.
-        """
-        return dict(num=self.num, data=self.data)
-
 
 def load_configuration():
     global issues
@@ -562,8 +534,6 @@ def load_database():
 
 
 def dump_database():
-    if conn is None:
-        return
     # Backup previous dump (and overwrite existing backup)
     if os.path.exists(dbfile):
         shutil.move(dbfile, dbfile + '.bak')
@@ -582,9 +552,6 @@ class AbstractOutput(object):
         pass
 
     def display(self):
-        pass
-
-    def display_final(self):
         pass
 
 
@@ -669,8 +636,19 @@ class BuilderOutput(AbstractOutput):
         self.counters[builder_status] += 1
 
     def display(self):
-        if self.options.quiet <= 1:
-            return
+        totals = []
+        for status in BUILDER_STATUSES:
+            if self.counters[status]:
+                totals.append(cformat(self.counters[status], status, sep=':'))
+
+        # With -qq option
+        if self.options.quiet > 1:
+            self._group_by_status()
+
+        # Show the summary at the bottom
+        print 'Totals:', ' + '.join(totals),
+
+    def _group_by_status(self):
         for status in BUILDER_STATUSES:
             names = self.groups[status]
             if not names:
@@ -683,13 +661,6 @@ class BuilderOutput(AbstractOutput):
             print cformat(status.title() + ':', status)
             for host, branches in sorted(platforms.items()):
                 print '\t' + cformat(host, status), ', '.join(branches)
-
-    def display_final(self):
-        totals = []
-        for status in BUILDER_STATUSES:
-            if self.counters[status]:
-                totals.append(cformat(self.counters[status], status, sep=':'))
-        print 'Totals:', ' + '.join(totals),
 
 
 class Revision:
@@ -723,9 +694,6 @@ class RevisionOutput(AbstractOutput):
                 '%s={%s}' % (cformat(key, key), ', '.join(values))
                 for key, values in revision.by_status.iteritems())
             print "%s: %s" % (number, results)
-
-    def display_final(self):
-        pass
 
 
 def parse_args():
@@ -904,13 +872,8 @@ def main():
 
     output.display()
 
-    if options.offline and conn is not None:
-        # In offline mode, there's no need to refresh the dump.
-        # The database is simply unloaded.
-        conn.close()
-        conn = None
-
-    output.display_final()
+    if not options.offline and conn is not None:
+        dump_database()
 
     return builders
 
@@ -921,4 +884,3 @@ if __name__ == '__main__':
         builders = main()
     finally:
         reset_terminal()
-        dump_database()
