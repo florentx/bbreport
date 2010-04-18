@@ -163,16 +163,19 @@ class Builder(object):
 
     def __init__(self, name):
         self.name = name
-        # the branch name should always be the last part of the name
-        if name.endswith(".dmg"):
-            # FIXME: fix buildbot names? :-)
-            self.host = name
-            branch = name[:-4]
-            if branch == u'2.7':
-                branch = u'trunk'
-            self.branch = branch
-        else:
+        try:
+            # the branch name should always be the last part of the name
             self.host, self.branch = name.rsplit(None, 1)
+        except ValueError:
+            if name.endswith(".dmg"):
+                # FIXME: fix buildbot names? :-)
+                self.host = name
+                branch = name[:-4]
+                if branch == u'2.7':
+                    branch = u'trunk'
+                self.branch = branch
+            else:
+                self.host, self.branch = name, 'unknown'
         self.url = baseurl + 'builders/' + urllib.quote(name)
         self.builds = {}
         self._load_builder()
@@ -663,7 +666,10 @@ class BuilderOutput(AbstractOutput):
                 continue
             platforms = {}
             for name in names:
-                host, branch = name.rsplit(None, 1)
+                try:
+                    host, branch = name.rsplit(None, 1)
+                except ValueError:
+                    host, branch = name, ''
                 platforms.setdefault(host, []).append(branch)
 
             print cformat(status.title() + ':', status)
@@ -790,11 +796,7 @@ def main():
 
             # refresh the dict of builders
             for name in added_builders:
-                try:
-                    builders[name] = Builder(name)
-                except ValueError:
-                    # XXX exception raised on '2.6.dmg' and similar.
-                    pass
+                builders[name] = Builder(name)
 
     # sort by branch and name
     builders = sorted(builders.values(), key=lambda b: (b.branch, str(b)))
