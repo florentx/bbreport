@@ -19,7 +19,10 @@ from contextlib import closing
 
 __version__ = '0.1dev'
 
-NUMBUILDS = 6
+# Default number of builds
+NUMBUILDS = 4
+# The XMLRPC methods may give an error with larger requests
+XMLRPC_LIMIT = 5
 DEFAULT_BRANCHES = 'all'
 DEFAULT_TIMEOUT = 4
 MSG_MAXLENGTH = 60
@@ -827,7 +830,7 @@ def main():
         # create the list of builders
         try:
             current_builders = set(proxy.getAllBuilders())
-        except socket.error, exc:
+        except IOError, exc:
             # Network is unreachable
             print '***', str(exc) + ', unable to refresh the list of builders'
             current_builders = None
@@ -893,11 +896,13 @@ def main():
     xrlastbuilds = {}
     if not options.offline:
         # don't overload the server with huge requests.
-        limit = min(NUMBUILDS * 2, numbuilds)
+        limit = min(XMLRPC_LIMIT, numbuilds)
         try:
             for xrb in proxy.getLastBuildsAllBuilders(limit):
                 xrlastbuilds.setdefault(xrb[0], []).append(xrb)
-        except socket.error, exc:
+        except xmlrpclib.Error, exc:
+            print '*** xmlrpclib.Error:', str(exc)
+        except IOError, exc:
             # Network is unreachable
             print '***', str(exc) + ', unable to retrieve the last builds'
             if not options.no_database:
