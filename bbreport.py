@@ -825,7 +825,12 @@ def main():
         proxy = xmlrpclib.ServerProxy(baseurl + 'all/xmlrpc')
 
         # create the list of builders
-        current_builders = set(proxy.getAllBuilders())
+        try:
+            current_builders = set(proxy.getAllBuilders())
+        except socket.error, exc:
+            # Network is unreachable
+            print '***', str(exc) + ', unable to refresh the list of builders'
+            current_builders = None
 
         # Do nothing if the RPC call returns an empty set
         if current_builders:
@@ -889,8 +894,15 @@ def main():
     if not options.offline:
         # don't overload the server with huge requests.
         limit = min(NUMBUILDS * 2, numbuilds)
-        for xrb in proxy.getLastBuildsAllBuilders(limit):
-            xrlastbuilds.setdefault(xrb[0], []).append(xrb)
+        try:
+            for xrb in proxy.getLastBuildsAllBuilders(limit):
+                xrlastbuilds.setdefault(xrb[0], []).append(xrb)
+        except socket.error, exc:
+            # Network is unreachable
+            print '***', str(exc) + ', unable to retrieve the last builds'
+            if not options.no_database:
+                print '*** running in offline mode'
+                options.offline = True
 
     if options.failures:
         print "... retrieving build results"
