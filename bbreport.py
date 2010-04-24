@@ -830,7 +830,7 @@ def main():
         # create the list of builders
         try:
             current_builders = set(proxy.getAllBuilders())
-        except IOError, exc:
+        except socket.error, exc:
             # Network is unreachable
             print '***', str(exc) + ', unable to refresh the list of builders'
             current_builders = None
@@ -902,7 +902,7 @@ def main():
                 xrlastbuilds.setdefault(xrb[0], []).append(xrb)
         except xmlrpclib.Error, exc:
             print '*** xmlrpclib.Error:', str(exc)
-        except IOError, exc:
+        except socket.error, exc:
             # Network is unreachable
             print '***', str(exc) + ', unable to retrieve the last builds'
             if not options.no_database:
