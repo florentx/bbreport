@@ -100,6 +100,7 @@ except NameError:
 
 
 def prepare_output():
+    # Read the configuration and set the ANSI sequences to colorize the output
     global cformat
 
     default_fg = DEFAULT_OUTPUT.get('foreground', '').lower()
@@ -116,22 +117,25 @@ def prepare_output():
         _escape_sequence[status] = '%s%s;%sm%%s\x1b[%sm' % \
             (_base, fg_offset + ANSI_COLOR.index(color), bg_color, fg_color)
 
+    # Fallback to normal output, without color
     if not sys.stdout.isatty() or (str(DEFAULT_OUTPUT.get('color')).lower() in
                                    ('false', '0', 'off', 'no')):
         cformat = _cformat_plain
 
 
 def _cformat_plain(text, status, sep=' '):
+    # Straight output: statuses are represented with symbols
     return sep.join((SYMBOL[status], str(text)))
 
 
 def _cformat_color(text, status, sep=None):
+    # Colored output
     return _escape_sequence[status] % text
 
 
 def reset_terminal():
     if cformat == _cformat_color:
-        # reset terminal colors
+        # Reset terminal colors
         print '\x1b[39;49;00m',
     print
 
@@ -148,6 +152,7 @@ def trunc(tests, length):
 
 
 def urlread(url):
+    # Return an empty string on IOError
     try:
         resource = urllib2.urlopen(url)
         return resource.read()
@@ -156,9 +161,8 @@ def urlread(url):
 
 
 class Builder(object):
-    """
-    Represent a builder.
-    """
+    """Represent a builder."""
+
     saved = status = None
     lastbuild = 0
 
@@ -168,15 +172,15 @@ class Builder(object):
             # the branch name should always be the last part of the name
             self.host, self.branch = name.rsplit(None, 1)
         except ValueError:
+            self.host = name
             if name.endswith(".dmg"):
                 # FIXME: fix buildbot names? :-)
-                self.host = name
                 branch = name[:-4]
                 if branch == u'2.7':
                     branch = u'trunk'
                 self.branch = branch
             else:
-                self.host, self.branch = name, 'unknown'
+                self.branch = 'unknown'
         self.url = baseurl + 'builders/' + urllib.quote(name)
         self.builds = {}
         self._load_builder()
@@ -185,14 +189,19 @@ class Builder(object):
 
     @classmethod
     def query_all(cls):
-        # Return the builders from the database, as a dict
+        """Return the builders from the database, as a dict."""
         if conn is None:
-            return []
+            return {}
         cur = conn.execute('select builder from builders where status '
                            'is null or status <> ?', (S_MISSING,))
         return dict((name, cls(name)) for (name,) in cur.fetchall())
 
     def get_builds(self, n, *builds):
+        """Yield the last n builds.
+
+        Optionally, build tuples can be passed, for builds retrieved by XMLRPC.
+        It helps building the list faster, with less server queries.
+        """
         if builds:
             # The list is not empty.  Maybe the first build is missing.
             if len(builds) < n:
@@ -225,6 +234,7 @@ class Builder(object):
                 return
 
     def get_saved_builds(self, n):
+        """Retrieve the last n builds from the local cache."""
         if conn is None:
             return []
         cur = conn.execute('select build from builds where builder = ? '
@@ -240,6 +250,7 @@ class Builder(object):
         return self.name
 
     def _load_builder(self):
+        """Populate the builder attributes from the local cache."""
         if conn is None:
             return
         row = conn.execute('select lastbuild, status from builders where '
@@ -249,6 +260,7 @@ class Builder(object):
             (self.lastbuild, self.status) = row
 
     def add(self, *builds):
+        """Add a build to this builder, and adjust lastbuild."""
         last = self.lastbuild
         for build in builds:
             self.builds[build.num] = build
@@ -258,10 +270,12 @@ class Builder(object):
             self.save()
 
     def set_status(self, status):
+        """Set the builder status."""
         self.status = status
         self.save()
 
     def save(self):
+        """Insert or update the builder in the local cache."""
         if conn is None:
             return
         if self.saved:
@@ -278,6 +292,7 @@ class Builder(object):
 
 
 class MatchIssue(object):
+    """Represent an issue from the issue tracker."""
 
     def __init__(self, number, test='', message='', builder=''):
         if not (test or message or builder):
@@ -292,33 +307,34 @@ class MatchIssue(object):
         self.builder = re.compile(builder)
 
     def match(self, test, message, builder):
+        """Check if the failure attributes match the issue criteria."""
         return all((self.test.match(test),
                     self.message.match(message),
                     self.builder.match(builder)))
 
 
 class Build(object):
-    """
-    Represent a single build of a builder.
+    """Represent a single build of a builder.
 
     Build.result should be one of (S_SUCCESS, S_FAILURE, S_EXCEPTION).
     If the result is not available, it defaults to S_BUILDING.
     """
-    _data = _message = saved = result = None
+    _message = saved = result = None
     revision = 0
 
     def __init__(self, name, buildnum, *args):
         self.builder = name
         self.num = buildnum
         self._url = '%s/builders/%s/builds/' % (baseurl, urllib.quote(name))
-        self._get_build(buildnum, args)
+        self._get_build(args)
         self.failed_tests = []
         if self.result not in (S_SUCCESS, S_BUILDING):
             self._get_failures()
         self.save()
 
-    def _get_build(self, buildnum, args):
-        if buildnum is not None:
+    def _get_build(self, args):
+        # Load the build data from the cache, or online
+        if self.num is not None:
             # Query the database
             self.result = self._load_build()
         if self.result:
@@ -340,6 +356,7 @@ class Build(object):
             self.result = S_EXCEPTION
 
     def _get_failures(self):
+        # Load the failures from the cache, or parse the stdio log
         if self.saved and conn is not None:
             cur = conn.execute('select failed from failures where '
                                'builder = ? and build = ?',
@@ -352,13 +369,11 @@ class Build(object):
 
     @property
     def url(self):
+        """Return the build URL."""
         return self._url + str(self.num)
 
-    @property
-    def data(self):
-        return self._data
-
     def save(self):
+        """Insert the build in the local cache."""
         if conn is None or self.saved:
             return
         if self.result not in (S_SUCCESS, S_FAILURE, S_EXCEPTION):
@@ -375,7 +390,7 @@ class Build(object):
         return True
 
     def _load_build(self):
-        # retrieve revision, result and message
+        # Load revision, result and message from the local cache
         result = None
         if conn is not None and self.num >= 0:
             row = conn.execute('select revision, result, message from builds'
@@ -387,7 +402,7 @@ class Build(object):
         return result
 
     def _parse_build(self):
-        # retrieve num, result, revision and message
+        # Retrieve num, result, revision and message from the server
         build_page = urlread(self.url)
         if not build_page:
             return S_BUILDING
@@ -405,6 +420,7 @@ class Build(object):
         return result
 
     def _parse_stdio(self):
+        # Lookup failures in the stdio log on the server
         stdio = urlread(self.url + '/steps/test/logs/stdio')
         stdio = stdio.replace(HTMLNOISE, '')
 
@@ -461,6 +477,7 @@ class Build(object):
             self.result = S_EXCEPTION
 
     def get_message(self, length=2048):
+        """Return the build result including failed test as a string."""
         if self.result in (S_SUCCESS, S_BUILDING):
             return self.result
         msg = self._message
@@ -493,6 +510,7 @@ class Build(object):
 
 
 def load_configuration():
+    # Load the configuration from the file
     global issues
 
     conf = ConfigParser()
@@ -537,6 +555,7 @@ def load_database():
     if conn is None:
         conn = sqlite3.connect(':memory:')
     if os.path.exists(dbfile):
+        # Load the database in memory
         with closing(gzip.open(dbfile, 'rb')) as f:
             conn.executescript(f.read())
     else:
@@ -559,25 +578,42 @@ def dump_database():
 
 
 class AbstractOutput(object):
+    """Base class for output."""
+
     def __init__(self, options):
         self.options = options
 
     def add_builds(self, name, builds):
-        # name: builder name (str)
-        # builds: list of Build objects
+        """Add builds for a builder.
+
+        This method adds builds to the output object.
+        It can render a message after each addition.
+
+        Arguments:
+          - name: builder name (str)
+          - builds: list of Build objects
+        """
         pass
 
     def display(self):
+        """Display result.
+
+        This method is called once, after all builds have been added to
+        the output object.  It renders the final message.
+        """
         pass
 
 
 class BuilderOutput(AbstractOutput):
+    """Default output."""
+
     def __init__(self, options):
         AbstractOutput.__init__(self, options)
         self.counters = dict((s, 0) for s in BUILDER_STATUSES)
         self.groups = dict((s, []) for s in BUILDER_STATUSES)
 
     def print_builder(self, name, builds):
+        """Print the builder result."""
         quiet = self.options.quiet
 
         count = {S_SUCCESS: 0, S_FAILURE: 0}
@@ -585,6 +621,7 @@ class BuilderOutput(AbstractOutput):
         failed_builds = []
 
         for build in builds:
+            # Save horizontal space, printing only the last 3 digits
             compact = (quiet or len(builds) > 6) and len(capsule) > 1
             if build is None:
                 if len(capsule) < NUMBUILDS:
@@ -682,12 +719,15 @@ class BuilderOutput(AbstractOutput):
                 print '\t' + cformat(host, status), ', '.join(branches)
 
 
-class Revision:
+class Revision(object):
+    """Represent all results for a revision, used for the RevisionOutput."""
     def __init__(self):
         self.by_status = collections.defaultdict(list)
 
 
 class RevisionOutput(AbstractOutput):
+    """Alternative output by revision."""
+
     def __init__(self, options):
         AbstractOutput.__init__(self, options)
         self.revisions = {}
@@ -706,8 +746,7 @@ class RevisionOutput(AbstractOutput):
             revision.by_status[build.result].append(name)
 
     def display(self):
-        revisions = self.revisions.items()
-        revisions.sort(key=lambda (key, value): key)
+        revisions = sorted(self.revisions.iteritems())
         for number, revision in revisions:
             results = ', '.join(
                 '%s={%s}' % (cformat(key, key), ', '.join(values))
@@ -787,11 +826,11 @@ def main():
 
         # create the list of builders
         current_builders = set(proxy.getAllBuilders())
-        saved_builders = set(builders.keys())
 
         # Do nothing if the RPC call returns an empty set
         if current_builders:
 
+            saved_builders = set(builders.keys())
             missing_builders = saved_builders - current_builders
             added_builders = current_builders - saved_builders
 
