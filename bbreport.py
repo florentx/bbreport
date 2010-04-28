@@ -796,9 +796,11 @@ class RevisionOutput(AbstractOutput):
             display_number = True
             for result, builds in revision.by_status.iteritems():
                 if not self.options.verbose \
-                and result in (S_BUILDING, S_SUCCESS) \
-                and (self.options.quiet or (revision.number != self.last_success)):
-                    continue
+                and result in (S_BUILDING, S_SUCCESS):
+                    if result != S_SUCCESS \
+                    or self.options.quiet \
+                    or (revision.number != self.last_success):
+                        continue
                 if display_number:
                     display_number = False
                     print "r%s:" % number
