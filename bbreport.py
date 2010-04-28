@@ -482,7 +482,7 @@ class Build(object):
     def get_message(self, length=2048):
         """Return the build result including failed test as a string."""
         if self.result in (S_SUCCESS, S_BUILDING):
-            return self.result
+            return cformat(self.result, self.result)
         msg = self._message
         if self.failed_tests:
             failed_tests = []
@@ -622,6 +622,7 @@ class BuilderOutput(AbstractOutput):
         count = {S_SUCCESS: 0, S_FAILURE: 0}
         capsule = []
         failed_builds = []
+        display_builds = []
 
         for build in builds:
             # Save horizontal space, printing only the last 3 digits
@@ -644,9 +645,12 @@ class BuilderOutput(AbstractOutput):
                 continue
             elif result == S_SUCCESS:
                 count[S_SUCCESS] += 1
+                if self.options.verbose:
+                    display_builds.append(build)
             else:
                 count[S_FAILURE] += 1
                 failed_builds.append(build)
+                display_builds.append(build)
 
         if quiet > 1:
             # Print only the colored buildbot names
@@ -678,7 +682,7 @@ class BuilderOutput(AbstractOutput):
             print
 
         if not quiet:
-            for build in failed_builds:
+            for build in display_builds:
                 print ' %5d:' % build.revision, build.get_message()
 
         return builder_status
@@ -779,6 +783,8 @@ def parse_args():
     parser.add_option('-l', '--limit', default=0, type="int",
                       help='limit the number of builds per builder '
                            '(default: %s)' % NUMBUILDS)
+    parser.add_option('-v', '--verbose', default=0, action='count',
+                      help='display also success')
     parser.add_option('-q', '--quiet', default=0, action='count',
                       help='one line per builder, or group by status with -qq')
     parser.add_option('-o', '--offline', default=False, action='store_true',
