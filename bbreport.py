@@ -728,7 +728,8 @@ class BuilderOutput(AbstractOutput):
 
 class Revision(object):
     """Represent all results for a revision, used for the RevisionOutput."""
-    def __init__(self):
+    def __init__(self, number):
+        self.number = number
         self.by_status = collections.defaultdict(list)
 
 
@@ -738,6 +739,7 @@ class RevisionOutput(AbstractOutput):
     def __init__(self, options):
         AbstractOutput.__init__(self, options)
         self.revisions = {}
+        self.last_success = 0
 
     def add_builds(self, name, builds):
         for build in builds:
@@ -745,16 +747,15 @@ class RevisionOutput(AbstractOutput):
                 continue
             if build.revision == 0:
                 continue
-            if not self.options.verbose \
-            and build.result in (S_BUILDING, S_SUCCESS):
-                continue
+            if build.result in S_SUCCESS:
+                self.last_success = max(self.last_success, build.revision)
             text = self.format_build(build)
             if text is None:
                 continue
             try:
                 revision = self.revisions[build.revision]
             except KeyError:
-                revision = Revision()
+                revision = Revision(build.revision)
                 self.revisions[build.revision] = revision
             revision.by_status[build.result].append(text)
 
@@ -780,23 +781,27 @@ class RevisionOutput(AbstractOutput):
                     # Hide known failures
                     return None
                 msg += ':' + trunc(tests, 2048)[0]
-            elif not self.options.quiet:
-                msg += ': "{0}"'.format(build_message)
+            elif self.options.verbose:
+                msg += ': "%s"' % build_message
             else:
                 # Hide errors different than failed tests
                 return None
         else:
             msg = cformat(msg, build.result)
-        msg = '{0} {1}'.format(
-            SYMBOL[build.result],
-            msg)
-        return msg
+        return '%s %s' % (SYMBOL[build.result], msg)
 
     def display(self):
         revisions = sorted(self.revisions.iteritems())
         for number, revision in revisions:
-            print "%s:" % number
-            for builds in revision.by_status.itervalues():
+            display_number = True
+            for result, builds in revision.by_status.iteritems():
+                if not self.options.verbose \
+                and result in (S_BUILDING, S_SUCCESS) \
+                and (self.options.quiet or (revision.number != self.last_success)):
+                    continue
+                if display_number:
+                    display_number = False
+                    print "r%s:" % number
                 for text in builds:
                     print(' ' + text)
 
