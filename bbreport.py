@@ -45,6 +45,8 @@ conn = None
 # Known issues
 issues = []
 
+KNOWN_ISSUE = "known_issue"
+
 # Common statuses for Builds and Builders
 S_BUILDING = 'building'
 S_SUCCESS = 'success'
@@ -80,7 +82,8 @@ SYMBOL = {S_SUCCESS: '_', S_FAILURE: '#', S_EXCEPTION: '?',
           S_UNSTABLE: '?', S_BUILDING: '*', S_OFFLINE: '*'}
 
 COLOR = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
-         S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'cyan'}
+         S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'cyan',
+         KNOWN_ISSUE: 'yellow'}
 
 _escape_sequence = {}
 
@@ -783,7 +786,7 @@ class RevisionOutput(AbstractOutput):
                     if not self.options.verbose \
                     and result in (S_BUILDING, S_SUCCESS):
                         if result != S_SUCCESS \
-                        or self.options.quiet \
+                        or (1 < self.options.quiet) \
                         or (revision.number != branch.last_revision):
                             del revision.by_status[result]
                 if not revision.by_status:
@@ -792,6 +795,9 @@ class RevisionOutput(AbstractOutput):
     def format_build(self, build):
         msg = build.builder
         if build.result not in (S_SUCCESS, S_BUILDING):
+            if build.result == S_EXCEPTION and (not self.options.verbose):
+                # Hide exceptions
+                return None
             msg = cformat(msg, build.result)
             build_message = build._message
             if build.failed_tests:
@@ -801,9 +807,9 @@ class RevisionOutput(AbstractOutput):
                     issue = next((issue for issue in issues
                                   if issue.match(test, build_message, build.builder)), None)
                     if issue:
-                        if not self.options.verbose:
+                        if self.options.quiet:
                             continue
-                        test += '`%s' % issue.number
+                        test = cformat(test + '`%s' % issue.number, KNOWN_ISSUE)
                     else:
                         unknown = True
                     tests.append(test)
@@ -811,11 +817,8 @@ class RevisionOutput(AbstractOutput):
                     # Hide known failures
                     return None
                 msg += ':' + trunc(tests, 2048)[0]
-            elif self.options.verbose:
-                msg += ': "%s"' % build_message
             else:
-                # Hide errors different than failed tests
-                return None
+                msg += ': "%s"' % build_message
         else:
             msg = cformat(msg, build.result)
         return '%s %s' % (SYMBOL[build.result], msg)
