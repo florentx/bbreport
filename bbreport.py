@@ -745,21 +745,60 @@ class RevisionOutput(AbstractOutput):
                 continue
             if build.revision == 0:
                 continue
+            if not self.options.verbose \
+            and build.result in (S_BUILDING, S_SUCCESS):
+                continue
+            text = self.format_build(build)
+            if text is None:
+                continue
             try:
                 revision = self.revisions[build.revision]
             except KeyError:
                 revision = Revision()
                 self.revisions[build.revision] = revision
-            revision.by_status[build.result].append(name)
+            revision.by_status[build.result].append(text)
+
+    def format_build(self, build):
+        msg = build.builder
+        if build.result not in (S_SUCCESS, S_BUILDING):
+            msg = cformat(msg, build.result)
+            build_message = build._message
+            if build.failed_tests:
+                tests = []
+                unknown = False
+                for test in build.failed_tests:
+                    issue = next((issue for issue in issues
+                                  if issue.match(test, build_message, build.builder)), None)
+                    if issue:
+                        if not self.options.verbose:
+                            continue
+                        test += '`%s' % issue.number
+                    else:
+                        unknown = True
+                    tests.append(test)
+                if not tests:
+                    # Hide known failures
+                    return None
+                msg += ':' + trunc(tests, 2048)[0]
+            elif not self.options.quiet:
+                msg += ': "{0}"'.format(build_message)
+            else:
+                # Hide errors different than failed tests
+                return None
+        else:
+            msg = cformat(msg, build.result)
+        msg = '{0} {1}'.format(
+            SYMBOL[build.result],
+            msg)
+        return msg
 
     def display(self):
         revisions = sorted(self.revisions.iteritems())
         for number, revision in revisions:
-            results = ', '.join(
-                '%s={%s}' % (cformat(key, key), ', '.join(values))
-                for key, values in revision.by_status.iteritems())
-            print "%s: %s" % (number, results)
-
+            print "%s:" % number
+            for builds in revision.by_status.itervalues():
+                for text in builds:
+                    print(' ' + text)
 
 def parse_args():
     """
