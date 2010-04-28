@@ -162,6 +162,21 @@ def urlread(url):
     except IOError:
         return ''
 
+def parse_builder_name(name):
+    try:
+        # the branch name should always be the last part of the name
+        host, branch = name.rsplit(None, 1)
+    except ValueError:
+        host = name
+        if name.endswith(".dmg"):
+            # FIXME: fix buildbot names? :-)
+            branch = name[:-4]
+            if branch == u'2.7':
+                branch = u'trunk'
+            branch = branch
+        else:
+            branch = 'unknown'
+    return host, branch
 
 class Builder(object):
     """Represent a builder."""
@@ -171,19 +186,7 @@ class Builder(object):
 
     def __init__(self, name):
         self.name = name
-        try:
-            # the branch name should always be the last part of the name
-            self.host, self.branch = name.rsplit(None, 1)
-        except ValueError:
-            self.host = name
-            if name.endswith(".dmg"):
-                # FIXME: fix buildbot names? :-)
-                branch = name[:-4]
-                if branch == u'2.7':
-                    branch = u'trunk'
-                self.branch = branch
-            else:
-                self.branch = 'unknown'
+        self.host, self.branch = parse_builder_name(name)
         self.url = baseurl + 'builders/' + urllib.quote(name)
         self.builds = {}
         self._load_builder()
@@ -726,6 +729,13 @@ class BuilderOutput(AbstractOutput):
                 print '\t' + cformat(host, status), ', '.join(branches)
 
 
+class Branch(object):
+    """Represent all results of a specific branch, used for the RevisionOutput."""
+    def __init__(self, name):
+        self.name = name
+        self.revisions = {}
+        self.last_revision = 0
+
 class Revision(object):
     """Represent all results for a revision, used for the RevisionOutput."""
     def __init__(self, number):
@@ -738,26 +748,46 @@ class RevisionOutput(AbstractOutput):
 
     def __init__(self, options):
         AbstractOutput.__init__(self, options)
-        self.revisions = {}
-        self.last_success = 0
+        self.branches = {}
 
     def add_builds(self, name, builds):
+        host, branch_name = parse_builder_name(name)
         for build in builds:
             if build is None:
                 continue
             if build.revision == 0:
                 continue
-            if build.result in S_SUCCESS:
-                self.last_success = max(self.last_success, build.revision)
+            try:
+                branch = self.branches[branch_name]
+            except KeyError:
+                branch = Branch(branch_name)
+                self.branches[branch.name] = branch
+            branch.last_revision = max(branch.last_revision, build.revision)
             text = self.format_build(build)
             if text is None:
                 continue
             try:
-                revision = self.revisions[build.revision]
+                revision = branch.revisions[build.revision]
             except KeyError:
                 revision = Revision(build.revision)
-                self.revisions[build.revision] = revision
+                branch.revisions[build.revision] = revision
             revision.by_status[build.result].append(text)
+
+        # Filter revisions: remove success and building builds
+        # depending on verbose and quiet optins
+        for branch in self.branches.itervalues():
+            branch_items = list(branch.revisions.items())
+            for number, revision in branch_items:
+                results = list(revision.by_status.keys())
+                for result in results:
+                    if not self.options.verbose \
+                    and result in (S_BUILDING, S_SUCCESS):
+                        if result != S_SUCCESS \
+                        or self.options.quiet \
+                        or (revision.number != branch.last_revision):
+                            del revision.by_status[result]
+                if not revision.by_status:
+                    del branch.revisions[number]
 
     def format_build(self, build):
         msg = build.builder
@@ -791,19 +821,24 @@ class RevisionOutput(AbstractOutput):
         return '%s %s' % (SYMBOL[build.result], msg)
 
     def display(self):
-        revisions = sorted(self.revisions.iteritems())
+        display_name = (len(self.branches) != 1)
+        empty_line = False
+        for branch in self.branches.itervalues():
+            if display_name:
+                if empty_line:
+                    print("")
+                title = "Branch %s" % branch.name
+                print(title)
+                print("=" * len(title))
+                print("")
+            self.display_revisions(branch.revisions)
+            empty_line = True
+
+    def display_revisions(self, revisions):
+        revisions = sorted(revisions.iteritems())
         for number, revision in revisions:
-            display_number = True
+            print "r%s:" % number
             for result, builds in revision.by_status.iteritems():
-                if not self.options.verbose \
-                and result in (S_BUILDING, S_SUCCESS):
-                    if result != S_SUCCESS \
-                    or self.options.quiet \
-                    or (revision.number != self.last_success):
-                        continue
-                if display_number:
-                    display_number = False
-                    print "r%s:" % number
                 for text in builds:
                     print(' ' + text)
 
