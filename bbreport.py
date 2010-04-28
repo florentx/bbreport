@@ -45,8 +45,6 @@ conn = None
 # Known issues
 issues = []
 
-KNOWN_ISSUE = "known_issue"
-
 # Common statuses for Builds and Builders
 S_BUILDING = 'building'
 S_SUCCESS = 'success'
@@ -82,8 +80,7 @@ SYMBOL = {S_SUCCESS: '_', S_FAILURE: '#', S_EXCEPTION: '?',
           S_UNSTABLE: '?', S_BUILDING: '*', S_OFFLINE: '*'}
 
 COLOR = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
-         S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'cyan',
-         KNOWN_ISSUE: 'yellow'}
+         S_UNSTABLE: 'yellow', S_BUILDING: 'blue', S_OFFLINE: 'cyan'}
 
 _escape_sequence = {}
 
@@ -798,7 +795,6 @@ class RevisionOutput(AbstractOutput):
             if build.result == S_EXCEPTION and (not self.options.verbose):
                 # Hide exceptions
                 return None
-            msg = cformat(msg, build.result)
             build_message = build._message
             if build.failed_tests:
                 tests = []
@@ -809,9 +805,10 @@ class RevisionOutput(AbstractOutput):
                     if issue:
                         if self.options.quiet:
                             continue
-                        test = cformat(test + '`%s' % issue.number, KNOWN_ISSUE)
+                        test += '`%s' % issue.number
                     else:
                         unknown = True
+                        test = cformat(test, build.result)
                     tests.append(test)
                 if not tests:
                     # Hide known failures
@@ -821,7 +818,7 @@ class RevisionOutput(AbstractOutput):
                 msg += ': "%s"' % build_message
         else:
             msg = cformat(msg, build.result)
-        return '%s %s' % (SYMBOL[build.result], msg)
+        return msg
 
     def display(self):
         display_name = (len(self.branches) != 1)
