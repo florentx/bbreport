@@ -162,6 +162,12 @@ def urlread(url):
     except IOError:
         return ''
 
+
+def get_issue(test, message, builder):
+    return next((issue for issue in issues
+                 if issue.match(test, message, builder)), None)
+
+
 def parse_builder_name(name):
     try:
         # the branch name should always be the last part of the name
@@ -177,6 +183,7 @@ def parse_builder_name(name):
         else:
             branch = 'unknown'
     return host, branch
+
 
 class Builder(object):
     """Represent a builder."""
@@ -491,8 +498,7 @@ class Build(object):
             failed_tests = []
             known = []
             for test in self.failed_tests:
-                issue = next((issue for issue in issues
-                              if issue.match(test, msg, self.builder)), None)
+                issue = get_issue(test, msg, self.builder)
                 if issue:
                     test += '`%s' % issue.number
                     known.append(test)
@@ -517,8 +523,6 @@ class Build(object):
 
 def load_configuration():
     # Load the configuration from the file
-    global issues
-
     conf = ConfigParser()
     conf.read(conffile)
     sections = conf.sections()
@@ -730,14 +734,23 @@ class BuilderOutput(AbstractOutput):
 
 
 class Branch(object):
-    """Represent all results of a specific branch, used for the RevisionOutput."""
+    """Represent all results of a specific branch.
+
+    Used for the RevisionOutput.
+    """
+
     def __init__(self, name):
         self.name = name
         self.revisions = {}
         self.last_revision = 0
 
+
 class Revision(object):
-    """Represent all results for a revision, used for the RevisionOutput."""
+    """Represent all results for a revision.
+
+    Used for the RevisionOutput.
+    """
+
     def __init__(self, number):
         self.number = number
         self.by_status = collections.defaultdict(list)
@@ -774,7 +787,7 @@ class RevisionOutput(AbstractOutput):
             revision.by_status[build.result].append(text)
 
         # Filter revisions: remove success and building builds
-        # depending on verbose and quiet optins
+        # depending on verbose and quiet options
         for branch in self.branches.itervalues():
             branch_items = list(branch.revisions.items())
             for number, revision in branch_items:
@@ -800,8 +813,7 @@ class RevisionOutput(AbstractOutput):
                 tests = []
                 unknown = False
                 for test in build.failed_tests:
-                    issue = next((issue for issue in issues
-                                  if issue.match(test, build_message, build.builder)), None)
+                    issue = get_issue(test, build_message, build.builder)
                     if issue:
                         if self.options.quiet:
                             continue
@@ -826,11 +838,11 @@ class RevisionOutput(AbstractOutput):
         for branch in self.branches.itervalues():
             if display_name:
                 if empty_line:
-                    print("")
+                    print ""
                 title = "Branch %s" % branch.name
-                print(title)
-                print("=" * len(title))
-                print("")
+                print title
+                print "=" * len(title)
+                print ""
             self.display_revisions(branch.revisions)
             empty_line = True
 
@@ -840,7 +852,8 @@ class RevisionOutput(AbstractOutput):
             print "r%s:" % number
             for result, builds in revision.by_status.iteritems():
                 for text in builds:
-                    print(' ' + text)
+                    print ' ' + text
+
 
 def parse_args():
     """
