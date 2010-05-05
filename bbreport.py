@@ -23,6 +23,7 @@ __version__ = '0.1dev'
 NUMBUILDS = 4
 # The XMLRPC methods may give an error with larger requests
 XMLRPC_LIMIT = 5
+CACHE_REVS = 600
 DEFAULT_BRANCHES = 'all'
 DEFAULT_TIMEOUT = 4
 MSG_MAXLENGTH = 60
@@ -139,8 +140,7 @@ def _cformat_color(text, status, sep=None):
 def reset_terminal():
     if cformat == _cformat_color:
         # Reset terminal colors
-        print '\x1b[39;49;00m',
-    print
+        print '\x1b[39;49;00m\r',
 
 cformat = _cformat_color
 
@@ -531,7 +531,8 @@ def load_configuration():
         for k, v in conf.items('global'):
             key = glow.get(k.lower())
             if key:
-                globals()[key] = v
+                conv = type(globals()[key])  # int or str
+                globals()[key] = conv(v)
     if 'output' in sections:
         DEFAULT_OUTPUT.update(conf.items('output'))
     if 'colors' in sections:
@@ -576,6 +577,21 @@ def load_database():
                      '(builder, build, revision, result, message)')
         conn.execute('create table failures'
                      '(builder, build, failed)')
+
+
+def prune_database():
+    if CACHE_REVS <= 0:
+        return
+    # Remove obsolete data
+    (latest,) = conn.execute('select max(revision) from builds').fetchone()
+    minrev = latest - CACHE_REVS
+    cur = conn.execute('delete from builds where revision between 1 and ?',
+                       (minrev - 1,))
+    if not cur.rowcount:
+        return
+    conn.execute('delete from failures where builder||":"||build '
+                 'not in (select builder||":"||build from builds)')
+    print 'Removed revisions < %s: %s builds' % (minrev, cur.rowcount)
 
 
 def dump_database():
@@ -713,7 +729,7 @@ class BuilderOutput(AbstractOutput):
             self._group_by_status()
 
         # Show the summary at the bottom
-        print 'Totals:', ' + '.join(totals),
+        print 'Totals:', ' + '.join(totals)
 
     def _group_by_status(self):
         for status in BUILDER_STATUSES:
@@ -1048,6 +1064,7 @@ def main():
     output.display()
 
     if not options.offline and conn is not None:
+        prune_database()
         dump_database()
 
     return builders
