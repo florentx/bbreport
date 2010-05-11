@@ -23,8 +23,7 @@ __version__ = '0.1dev'
 NUMBUILDS = 4
 # The XMLRPC methods may give an error with larger requests
 XMLRPC_LIMIT = 5
-CACHE_REVS = 600
-CACHE_BUILDS = 100
+CACHE_BUILDS = 50
 DEFAULT_BRANCHES = 'all'
 DEFAULT_TIMEOUT = 4
 MSG_MAXLENGTH = 60
@@ -592,16 +591,8 @@ def load_database():
 
 
 def prune_database():
-    if CACHE_REVS <= 0:
-        return
-    # Remove obsolete data
-    (latest,) = conn.execute('select max(revision) from builds').fetchone()
-    minrev = latest - CACHE_REVS
-    cur = conn.execute('delete from builds where revision between 1 and ?',
-                       (minrev - 1,))
-    if removed_builds or cur.rowcount:
-        print 'Removed revisions < %s: %s builds' % \
-              (minrev, removed_builds + cur.rowcount)
+    if removed_builds:
+        print 'Removed %s ancient builds' % removed_builds
         # Now purge the failures
         conn.execute('delete from failures where builder||":"||build '
                      'not in (select builder||":"||build from builds)')
