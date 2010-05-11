@@ -24,6 +24,7 @@ NUMBUILDS = 4
 # The XMLRPC methods may give an error with larger requests
 XMLRPC_LIMIT = 5
 CACHE_REVS = 600
+CACHE_BUILDS = 100
 DEFAULT_BRANCHES = 'all'
 DEFAULT_TIMEOUT = 4
 MSG_MAXLENGTH = 60
@@ -43,6 +44,8 @@ dbfile = basefile + '.cache'
 conn = None
 # Known issues
 issues = []
+# Count removed builds
+removed_builds = 0
 
 # Common statuses for Builds and Builders
 S_BUILDING = 'building'
@@ -279,12 +282,24 @@ class Builder(object):
             last = max(last, build.num)
         if last > self.lastbuild:
             self.lastbuild = last
+            self.remove_oldest()
             self.save()
 
     def set_status(self, status):
         """Set the builder status."""
         self.status = status
         self.save()
+
+    def remove_oldest(self):
+        global removed_builds
+        if CACHE_BUILDS <= 0:
+            return
+        # Remove obsolete data
+        minbuild = self.lastbuild - CACHE_BUILDS
+        cur = conn.execute('delete from builds where builder = ? and '
+                           'build < ?', (self.name, minbuild))
+        if cur.rowcount:
+            removed_builds += cur.rowcount
 
     def save(self):
         """Insert or update the builder in the local cache."""
@@ -584,11 +599,12 @@ def prune_database():
     minrev = latest - CACHE_REVS
     cur = conn.execute('delete from builds where revision between 1 and ?',
                        (minrev - 1,))
-    if not cur.rowcount:
-        return
-    conn.execute('delete from failures where builder||":"||build '
-                 'not in (select builder||":"||build from builds)')
-    print 'Removed revisions < %s: %s builds' % (minrev, cur.rowcount)
+    if removed_builds or cur.rowcount:
+        print 'Removed revisions < %s: %s builds' % \
+              (minrev, removed_builds + cur.rowcount)
+        # Now purge the failures
+        conn.execute('delete from failures where builder||":"||build '
+                     'not in (select builder||":"||build from builds)')
 
 
 def dump_database():
