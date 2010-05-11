@@ -38,8 +38,6 @@ basefile = os.path.splitext(__file__)[0]
 conffile = basefile + '.conf'
 # Database file
 dbfile = basefile + '.cache'
-# Old location (deprecated)
-legacy_dbfile = basefile + '.sqlite'
 
 # Database connection
 conn = None
@@ -122,8 +120,9 @@ def prepare_output():
             (_base, fg_offset + ANSI_COLOR.index(color), bg_color, fg_color)
 
     # Fallback to normal output, without color
-    if not sys.stdout.isatty() or (str(DEFAULT_OUTPUT.get('color')).lower() in
-                                   ('false', '0', 'off', 'no')):
+    with_color = DEFAULT_OUTPUT.get('color')
+    if (with_color is None and not sys.stdout.isatty() or
+        with_color in ('false', '0', 'off', 'no')):
         cformat = _cformat_plain
 
 
@@ -551,11 +550,9 @@ def load_configuration():
 
 
 def upgrade_dbfile():
-    # Now the database file is gzipped
-    if os.path.exists(legacy_dbfile) and not os.path.exists(dbfile):
-        with closing(gzip.open(dbfile, 'wb')) as out:
-            with open(legacy_dbfile, 'rb') as in_:
-                out.write(in_.read())
+    # Placeholder for future database migration
+    legacy_dbfile = basefile + '.sqlite'
+    if os.path.exists(legacy_dbfile):
         os.unlink(legacy_dbfile)
 
 
