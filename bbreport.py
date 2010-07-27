@@ -174,15 +174,10 @@ def parse_builder_name(name):
         # the branch name should always be the last part of the name
         host, branch = name.rsplit(None, 1)
     except ValueError:
-        host = name
-        if name.endswith(".dmg"):
+        host, branch = name, u'unknown'
+        if name.endswith(u'.dmg'):
             # FIXME: fix buildbot names? :-)
             branch = name[:-4]
-            if branch == u'2.7':
-                branch = u'trunk'
-            branch = branch
-        else:
-            branch = 'unknown'
     return host, branch
 
 
