@@ -121,8 +121,8 @@ try:
 except AttributeError:
 
     def out(*args, **kw):
-        end = kw.get('end', '\n')
-        sys.stdout.write(' '.join(str(arg) for arg in args) + end)
+        sys.stdout.write(' '.join(str(arg) for arg in args) +
+                         kw.get('end', '\n'))
 
 
 def exc():
@@ -144,8 +144,8 @@ def prepare_output():
                      if color in default_bg), 49)
 
     for status, color in COLOR.items():
-        _escape_sequence[status] = '%s%s;%sm%%s\x1b[%sm' % \
-            (_base, fg_offset + ANSI_COLOR.index(color), bg_color, fg_color)
+        _escape_sequence[status] = ('%s%s;%sm%%s\x1b[%sm' %
+            (_base, fg_offset + ANSI_COLOR.index(color), bg_color, fg_color))
 
     # Fallback to normal output, without color
     with_color = DEFAULT_OUTPUT.get('color')
@@ -808,9 +808,7 @@ class RevisionOutput(AbstractOutput):
     def add_builds(self, name, builds):
         host, branch_name = parse_builder_name(name)
         for build in builds:
-            if build is None:
-                continue
-            if build.revision == 0:
+            if build is None or build.revision == 0:
                 continue
             try:
                 branch = self.branches[branch_name]
@@ -835,12 +833,10 @@ class RevisionOutput(AbstractOutput):
             for number, revision in branch_items:
                 results = list(revision.by_status.keys())
                 for result in results:
-                    if not self.options.verbose \
-                    and result in (S_BUILDING, S_SUCCESS):
-                        if result != S_SUCCESS \
-                        or (1 < self.options.quiet) \
-                        or (revision.number != branch.last_revision):
-                            del revision.by_status[result]
+                    if not self.options.verbose and (result == S_BUILDING or
+                       (result == S_SUCCESS and (self.options.quiet > 1 or
+                       revision.number != branch.last_revision))):
+                        del revision.by_status[result]
                 if not revision.by_status:
                     del branch.revisions[number]
 
