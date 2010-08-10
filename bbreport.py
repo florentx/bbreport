@@ -1,21 +1,31 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 from __future__ import with_statement
-import re
-import urllib
-import urllib2
+
+import collections
 import fnmatch
 import gzip
 import optparse
 import os
+import re
 import shutil
 import socket
 import sqlite3
 import sys
-import xmlrpclib
-import collections
-from ConfigParser import ConfigParser
 from contextlib import closing
+
+try:
+    # Python 2.x
+    import urllib2
+    import urllib
+    import xmlrpclib
+    from ConfigParser import ConfigParser
+except ImportError:
+    # Python 3.x
+    import urllib.request as urllib2
+    import urllib.parse as urllib
+    import xmlrpc.client as xmlrpclib
+    from configparser import ConfigParser
 
 __version__ = '0.1dev'
 
@@ -57,24 +67,28 @@ S_MISSING = 'missing'       # Builder only
 
 BUILDER_STATUSES = (S_BUILDING, S_SUCCESS, S_UNSTABLE, S_FAILURE, S_OFFLINE)
 
+# bytes/unicode helpers
+b = lambda s: s.encode('utf-8')
+u = lambda s: s.decode('utf-8')
+
 # Regular expressions
-RE_BUILD = re.compile('Build #(\d+)</h1>\r?\n?'
-                      '<h2>Results:</h2>\r?\n?'
-                      '<span class="([^"]+)">([^<]+)</span>')
-RE_BUILD_REVISION = re.compile('<li>Revision: (\d+)</li>')
-RE_FAILED = re.compile('(\d+) tests? failed:((?:\r?\n? +([^\r\n]+))+)')
-RE_TIMEOUT = re.compile('command timed out: (\d+) ([^,]+)')
-RE_STOP = re.compile('(process killed by .+)')
-RE_BBTEST = re.compile('make: \*\*\* \[buildbottest\] (.+)')
-RE_TEST = re.compile('(test_[^ ]+)$')
+RE_BUILD = re.compile(b('Build #(\d+)</h1>\r?\n?'
+                        '<h2>Results:</h2>\r?\n?'
+                        '<span class="([^"]+)">([^<]+)</span>'))
+RE_BUILD_REVISION = re.compile(b('<li>Revision: (\d+)</li>'))
+RE_FAILED = re.compile(b('(\d+) tests? failed:((?:\r?\n? +([^\r\n]+))+)'))
+RE_TIMEOUT = re.compile(b('command timed out: (\d+) ([^,]+)'))
+RE_STOP = re.compile(b('(process killed by .+)'))
+RE_BBTEST = re.compile(b('make: \*\*\* \[buildbottest\] (.+)'))
+RE_TEST = re.compile(b('(test_[^ ]+)$'))
 
 # Buildbot errors
-OSERRORS = ('filesystem is full',
-            'No space left on device',
-            'Cannot allocate memory')
+OSERRORS = (b('filesystem is full'),
+            b('No space left on device'),
+            b('Cannot allocate memory'))
 
 # HTML pollution in the stdio log
-HTMLNOISE = '</span><span class="stdout">'
+HTMLNOISE = b('</span><span class="stdout">')
 
 # Format output
 SYMBOL = {S_SUCCESS: '_', S_FAILURE: '#', S_EXCEPTION: '?',
@@ -101,6 +115,18 @@ except NameError:
         for item in iterator:
             return item
         return default
+
+try:
+    out = getattr(__builtins__, 'print')
+except AttributeError:
+
+    def out(*args, **kw):
+        end = kw.get('end', '\n')
+        sys.stdout.write(' '.join(str(arg) for arg in args) + end)
+
+
+def exc():
+    return str(sys.exc_info()[1])
 
 
 def prepare_output():
@@ -141,7 +167,7 @@ def _cformat_color(text, status, sep=None):
 def reset_terminal():
     if cformat == _cformat_color:
         # Reset terminal colors
-        print '\x1b[39;49;00m\r',
+        out('\x1b[39;49;00m\r', end='')
 
 cformat = _cformat_color
 
@@ -161,7 +187,7 @@ def urlread(url):
         resource = urllib2.urlopen(url)
         return resource.read()
     except IOError:
-        return ''
+        return b('')
 
 
 def get_issue(test, message, builder):
@@ -174,8 +200,8 @@ def parse_builder_name(name):
         # the branch name should always be the last part of the name
         host, branch = name.rsplit(None, 1)
     except ValueError:
-        host, branch = name, u'unknown'
-        if name.endswith(u'.dmg'):
+        host, branch = name, 'unknown'
+        if name.endswith('.dmg'):
             # FIXME: fix buildbot names? :-)
             branch = name[:-4]
     return host, branch
@@ -430,8 +456,8 @@ class Build(object):
         match = RE_BUILD.search(build_page)
         if match:
             self.num = int(match.group(1))
-            result = match.group(2)
-            self._message = match.group(3)
+            result = u(match.group(2))
+            self._message = u(match.group(3))
         else:
             result = S_BUILDING
         match = RE_BUILD_REVISION.search(build_page)
@@ -443,13 +469,13 @@ class Build(object):
     def _parse_stdio(self):
         # Lookup failures in the stdio log on the server
         stdio = urlread(self.url + '/steps/test/logs/stdio')
-        stdio = stdio.replace(HTMLNOISE, '')
+        stdio = stdio.replace(HTMLNOISE, b(''))
 
         # Check if some test failed
         fail = RE_FAILED.search(stdio)
         if fail:
             failed_count = int(fail.group(1))
-            failed_tests = fail.group(2).strip()
+            failed_tests = u(fail.group(2).strip())
             self.failed_tests = failed_tests.split()
             assert len(self.failed_tests) == failed_count
 
@@ -461,7 +487,7 @@ class Build(object):
             if error is None:
                 continue
             self.result = S_EXCEPTION
-            self._message = error.lower()
+            self._message = u(error.lower())
             break
         else:
             self._message = error = ''
@@ -475,7 +501,7 @@ class Build(object):
         for line in reversed_lines:
             killed = RE_BBTEST.search(line) or RE_STOP.search(line)
             if killed:
-                self._message = killed.group(1).strip().lower()
+                self._message = u(killed.group(1).strip().lower())
                 # Check previous line for a possible timeout
                 line = next(reversed_lines)
 
@@ -491,7 +517,7 @@ class Build(object):
             failed = RE_TEST.match(line)
             if failed:
                 # This is the last running test
-                self.failed_tests = [failed.group(1)]
+                self.failed_tests = [u(failed.group(1))]
                 break
         else:
             # No test failure: probably a buildbot error
@@ -574,7 +600,7 @@ def load_database():
     if os.path.exists(dbfile):
         # Load the database in memory
         with closing(gzip.open(dbfile, 'rb')) as f:
-            conn.executescript(f.read())
+            conn.executescript(u(f.read()))
     else:
         # Initialize the tables
         conn.execute('create table builders'
@@ -587,7 +613,7 @@ def load_database():
 
 def prune_database():
     if removed_builds:
-        print 'Removed %s ancient builds' % removed_builds
+        out('Removed %s ancient builds' % removed_builds)
         # Now purge the failures
         conn.execute('delete from failures where builder||":"||build '
                      'not in (select builder||":"||build from builds)')
@@ -599,7 +625,7 @@ def dump_database():
         shutil.move(dbfile, dbfile + '.bak')
     # Dump the database
     with closing(gzip.open(dbfile, 'wb')) as f:
-        f.writelines(l + os.linesep for l in conn.iterdump())
+        f.writelines(b(l + os.linesep) for l in conn.iterdump())
 
 
 class AbstractOutput(object):
@@ -694,18 +720,19 @@ class BuilderOutput(AbstractOutput):
         else:
             builder_status = S_SUCCESS
 
-        print cformat('%-26s' % name, builder_status), ', '.join(capsule),
+        out(cformat('%-26s' % name, builder_status), ', '.join(capsule),
+            end=' ')
 
         if quiet and failed_builds:
             # Print last failure or error.
-            print failed_builds[0].get_message(MSG_MAXLENGTH)
+            out(failed_builds[0].get_message(MSG_MAXLENGTH))
         else:
             # Move to next line
-            print
+            out()
 
         if not quiet:
             for build in display_builds:
-                print ' %5d:' % build.revision, build.get_message()
+                out(' %5d:' % build.revision, build.get_message())
 
         return builder_status
 
@@ -728,7 +755,7 @@ class BuilderOutput(AbstractOutput):
             self._group_by_status()
 
         # Show the summary at the bottom
-        print 'Totals:', ' + '.join(totals)
+        out('Totals:', ' + '.join(totals))
 
     def _group_by_status(self):
         for status in BUILDER_STATUSES:
@@ -743,9 +770,9 @@ class BuilderOutput(AbstractOutput):
                     host, branch = name, ''
                 platforms.setdefault(host, []).append(branch)
 
-            print cformat(status.title() + ':', status)
+            out(cformat(status.title() + ':', status))
             for host, branches in sorted(platforms.items()):
-                print '\t' + cformat(host, status), ', '.join(branches)
+                out('\t' + cformat(host, status), ', '.join(branches))
 
 
 class Branch(object):
@@ -803,7 +830,7 @@ class RevisionOutput(AbstractOutput):
 
         # Filter revisions: remove success and building builds
         # depending on verbose and quiet options
-        for branch in self.branches.itervalues():
+        for branch in self.branches.values():
             branch_items = list(branch.revisions.items())
             for number, revision in branch_items:
                 results = list(revision.by_status.keys())
@@ -850,24 +877,24 @@ class RevisionOutput(AbstractOutput):
     def display(self):
         display_name = (len(self.branches) != 1)
         empty_line = False
-        for branch in self.branches.itervalues():
+        for branch in self.branches.values():
             if display_name:
                 if empty_line:
-                    print ""
+                    out()
                 title = "Branch %s" % branch.name
-                print title
-                print "=" * len(title)
-                print ""
+                out(title)
+                out("=" * len(title))
+                out()
             self.display_revisions(branch.revisions)
             empty_line = True
 
     def display_revisions(self, revisions):
-        revisions = sorted(revisions.iteritems())
+        revisions = sorted(revisions.items())
         for number, revision in revisions:
-            print "r%s:" % number
-            for result, builds in revision.by_status.iteritems():
+            out("r%s:" % number)
+            for result, builds in revision.by_status.items():
                 for text in builds:
-                    print ' ' + text
+                    out(' ' + text)
 
 
 def parse_args():
@@ -909,7 +936,7 @@ def parse_args():
     options, args = parser.parse_args()
 
     if options.offline and options.no_database:
-        print "--offline and --no-database don't go together"
+        out("--offline and --no-database don't go together")
         sys.exit(1)
 
     if options.failures:
@@ -945,9 +972,9 @@ def main():
         # create the list of builders
         try:
             current_builders = set(proxy.getAllBuilders())
-        except socket.error, exc:
+        except socket.error:
             # Network is unreachable
-            print '***', str(exc) + ', unable to refresh the list of builders'
+            out('***', exc() + ', unable to refresh the list of builders')
             current_builders = None
 
         # Do nothing if the RPC call returns an empty set
@@ -993,14 +1020,14 @@ def main():
                              if re.match(pattern, builder.name, re.I)]
 
     branches = sorted(set(b.branch for b in selected_builders))
-    print 'Selected builders:', len(selected_builders), '/', len(builders),
-    print '(branch%s: %s)' % ('es' if len(branches) > 1 else '',
-                              ', '.join(branches))
+    out('Selected builders:', len(selected_builders), '/', len(builders),
+        '(branch%s: %s)' % ('es' if len(branches) > 1 else '',
+                            ', '.join(branches)))
 
     if options.quiet > 1:
         # For the "-qq" option, 2 builds per builder is enough
         numbuilds = 2
-        print "... retrieving last build results"
+        out("... retrieving last build results")
     elif options.quiet or options.limit or len(selected_builders) > 2:
         numbuilds = options.limit or NUMBUILDS
     else:
@@ -1015,17 +1042,17 @@ def main():
         try:
             for xrb in proxy.getLastBuildsAllBuilders(limit):
                 xrlastbuilds.setdefault(xrb[0], []).append(xrb)
-        except xmlrpclib.Error, exc:
-            print '*** xmlrpclib.Error:', str(exc)
-        except socket.error, exc:
+        except xmlrpclib.Error:
+            out('*** xmlrpclib.Error:', exc())
+        except socket.error:
             # Network is unreachable
-            print '***', str(exc) + ', unable to retrieve the last builds'
+            out('***', exc() + ', unable to retrieve the last builds')
             if not options.no_database:
-                print '*** running in offline mode'
+                out('*** running in offline mode')
                 options.offline = True
 
     if options.failures:
-        print "... retrieving build results"
+        out("... retrieving build results")
 
     # loop through the builders and their builds
     if options.mode == "revision":
