@@ -54,7 +54,7 @@ dbfile = basefile + '.cache'
 conn = None
 # Issues
 known_issues = []
-new_issues = []
+new_failures = []
 # Count removed builds
 removed_builds = 0
 
@@ -195,7 +195,7 @@ def urlread(url):
 def get_issue(test, message, builder):
     issue = next((issue for issue in known_issues
                   if issue.match(test, message, builder)), None)
-    events = issue.events if issue else new_issues
+    events = issue.events if issue else new_failures
     events.append((test, message, builder))
     return issue
 
@@ -921,9 +921,9 @@ class IssueOutput(AbstractOutput):
             for failure, l in groupby(sorted(issue.events)):
                 out(indent, ':'.join(failure),
                     cformat('*%s' % len(list(l)), S_BUILDING, sep=''))
-        if new_issues:
-            out('\nNew issues:')
-            for failure, l in groupby(sorted(new_issues)):
+        if new_failures:
+            out('\nNew failures:')
+            for failure, l in groupby(sorted(new_failures)):
                 out(' *%s ' % len(list(l)),
                     cformat(':'.join(failure), S_FAILURE))
 
