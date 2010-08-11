@@ -13,6 +13,7 @@ import socket
 import sqlite3
 import sys
 from contextlib import closing
+from itertools import groupby
 
 try:
     # Python 2.x
@@ -51,8 +52,9 @@ dbfile = basefile + '.cache'
 
 # Database connection
 conn = None
-# Known issues
-issues = []
+# Issues
+known_issues = []
+new_issues = []
 # Count removed builds
 removed_builds = 0
 
@@ -191,8 +193,11 @@ def urlread(url):
 
 
 def get_issue(test, message, builder):
-    return next((issue for issue in issues
-                 if issue.match(test, message, builder)), None)
+    issue = next((issue for issue in known_issues
+                  if issue.match(test, message, builder)), None)
+    events = issue.events if issue else new_issues
+    events.append((test, message, builder))
+    return issue
 
 
 def parse_builder_name(name):
@@ -346,12 +351,17 @@ class MatchIssue(object):
             raise Exception('MatchIssue needs a test or a message '
                             'or a builder regex')
         self.number = number
+        self.rule = (test, message, builder)
+        self.events = []
         # Match the failed test exactly
         if test and not test.endswith('$'):
             test += '$'
         self.test = re.compile(test)
         self.message = re.compile(message)
         self.builder = re.compile(builder)
+
+    def __repr__(self):
+        return '%s: %s:%s:%s' % ((self.number,) + self.rule)
 
     def match(self, test, message, builder):
         """Check if the failure attributes match the issue criteria."""
@@ -581,7 +591,7 @@ def load_configuration():
     # Load the known issues
     for num, rule in conf.items('issues'):
         args = (arg.strip() for arg in rule.split(':'))
-        issues.append(MatchIssue(num, *args))
+        known_issues.append(MatchIssue(num, *args))
 
 
 def upgrade_dbfile():
@@ -893,6 +903,31 @@ class RevisionOutput(AbstractOutput):
                     out(' ' + text)
 
 
+class IssueOutput(AbstractOutput):
+    """Alternative output by issue."""
+
+    def add_builds(self, name, builds):
+        """Add builds for a builder."""
+        for build in builds:
+            if build is not None:
+                # Load the build results
+                build.get_message()
+
+    def display(self):
+        """Display result."""
+        for issue in sorted(known_issues, key=lambda issue: -len(issue.events)):
+            out(issue)
+            indent = ' ' * (len(issue.number) + 1)
+            for failure, l in groupby(sorted(issue.events)):
+                out(indent, ':'.join(failure),
+                    cformat('*%s' % len(list(l)), S_BUILDING, sep=''))
+        if new_issues:
+            out('\nNew issues:')
+            for failure, l in groupby(sorted(new_issues)):
+                out(' *%s ' % len(list(l)),
+                    cformat(':'.join(failure), S_FAILURE))
+
+
 def parse_args():
     """
     Create an option parser, parse the result and return options and args.
@@ -905,7 +940,7 @@ def parse_args():
                       metavar='NAME', help='buildbot name')
     parser.add_option('-b', '--branches', dest='branches', default=None,
                       metavar='BRANCHES',
-                      help='the Python branches (e.g. trunk,3.1,3.x)')
+                      help='the Python branches (e.g. 2.7,3.x)')
     parser.add_option('-u', '--build', dest='build', default=None,
                       metavar='num', help='the build number of a buildslave'
                                           ' (not implemented)')
@@ -926,8 +961,8 @@ def parse_args():
     parser.add_option('--no-database', default=False, action='store_true',
                       help='do not cache the result in a database file')
     parser.add_option('--mode', default="builder", type="choice",
-                      choices=("builder", "revision"),
-                      help='output mode: "builder" or "revision"')
+                      choices=("builder", "revision", "issue"),
+                      help='output mode: "builder", "revision" or "issue"')
 
     options, args = parser.parse_args()
 
@@ -1053,6 +1088,8 @@ def main():
     # loop through the builders and their builds
     if options.mode == "revision":
         output_class = RevisionOutput
+    elif options.mode == "issue":
+        output_class = IssueOutput
     else:
         output_class = BuilderOutput
     output = output_class(options)
