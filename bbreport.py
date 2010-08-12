@@ -823,6 +823,7 @@ class RevisionOutput(AbstractOutput):
     def __init__(self, options):
         AbstractOutput.__init__(self, options)
         self.branches = {}
+        out("... retrieving build results")
 
     def add_builds(self, name, builds):
         host, branch_name = parse_builder_name(name)
@@ -914,6 +915,10 @@ class RevisionOutput(AbstractOutput):
 
 class IssueOutput(AbstractOutput):
     """Alternative output by issue."""
+
+    def __init__(self, options):
+        AbstractOutput.__init__(self, options)
+        out("... retrieving build results")
 
     def add_builds(self, name, builds):
         """Add builds for a builder."""
