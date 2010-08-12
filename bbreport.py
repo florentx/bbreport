@@ -546,7 +546,8 @@ class Build(object):
             failed_tests = []
             known = []
             for test in self.failed_tests:
-                issue = get_issue(test, msg, self.builder)
+                event = (test, msg, self.builder)
+                issue = get_issue(*event)
                 if issue:
                     events = issue.events
                     test += '`%s' % issue.number
@@ -554,8 +555,7 @@ class Build(object):
                 else:
                     events = new_failures
                     failed_tests.append(test)
-                revs = events.setdefault((test, msg, self.builder), [])
-                revs.append(str(self.revision))
+                events.setdefault(event, []).append(str(self.revision))
             failed_count = len(failed_tests) + len(known)
             if self.result == S_EXCEPTION and failed_count > 2:
                 # disk full or other buildbot error
