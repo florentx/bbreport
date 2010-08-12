@@ -200,8 +200,8 @@ def print_new_failures():
     if new_failures:
         out('\nNew failures:')
         for failure, revisions in sorted(new_failures.items()):
-            out('    ', cformat(':'.join(failure), S_FAILURE),
-                cformat(' '.join(revisions), S_UNSTABLE))
+            out('    ', ':'.join(failure),
+                cformat(' '.join(revisions), S_FAILURE))
 
 
 def parse_builder_name(name):
