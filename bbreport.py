@@ -13,7 +13,6 @@ import socket
 import sqlite3
 import sys
 from contextlib import closing
-from itertools import groupby
 
 try:
     # Python 2.x
@@ -54,7 +53,7 @@ dbfile = basefile + '.cache'
 conn = None
 # Issues
 known_issues = []
-new_failures = []
+new_failures = {}
 # Count removed builds
 removed_builds = 0
 
@@ -193,11 +192,16 @@ def urlread(url):
 
 
 def get_issue(test, message, builder):
-    issue = next((issue for issue in known_issues
-                  if issue.match(test, message, builder)), None)
-    events = issue.events if issue else new_failures
-    events.append((test, message, builder))
-    return issue
+    return next((issue for issue in known_issues
+                 if issue.match(test, message, builder)), None)
+
+
+def print_new_failures():
+    if new_failures:
+        out('\nNew failures:')
+        for failure, revisions in sorted(new_failures.items()):
+            out('    ', cformat(':'.join(failure), S_FAILURE),
+                cformat(' '.join(revisions), S_UNSTABLE))
 
 
 def parse_builder_name(name):
@@ -352,7 +356,7 @@ class MatchIssue(object):
                             'or a builder regex')
         self.number = number
         self.rule = (test, message, builder)
-        self.events = []
+        self.events = {}
         # Match the failed test exactly
         if test and not test.endswith('$'):
             test += '$'
@@ -544,10 +548,14 @@ class Build(object):
             for test in self.failed_tests:
                 issue = get_issue(test, msg, self.builder)
                 if issue:
+                    events = issue.events
                     test += '`%s' % issue.number
                     known.append(test)
                 else:
+                    events = new_failures
                     failed_tests.append(test)
+                revs = events.setdefault((test, msg, self.builder), [])
+                revs.append(str(self.revision))
             failed_count = len(failed_tests) + len(known)
             if self.result == S_EXCEPTION and failed_count > 2:
                 # disk full or other buildbot error
@@ -766,6 +774,7 @@ class BuilderOutput(AbstractOutput):
 
         # Show the summary at the bottom
         out('Totals:', ' + '.join(totals))
+        print_new_failures()
 
     def _group_by_status(self):
         for status in BUILDER_STATUSES:
@@ -915,17 +924,15 @@ class IssueOutput(AbstractOutput):
 
     def display(self):
         """Display result."""
-        for issue in sorted(known_issues, key=lambda issue: -len(issue.events)):
+        # Known issues
+        for issue in sorted(known_issues, key=lambda m: -len(m.events)):
             out(issue)
             indent = ' ' * (len(issue.number) + 1)
-            for failure, l in groupby(sorted(issue.events)):
+            for failure, revisions in sorted(issue.events.items()):
                 out(indent, ':'.join(failure),
-                    cformat('*%s' % len(list(l)), S_BUILDING, sep=''))
-        if new_failures:
-            out('\nNew failures:')
-            for failure, l in groupby(sorted(new_failures)):
-                out(' *%s ' % len(list(l)),
-                    cformat(':'.join(failure), S_FAILURE))
+                    cformat(' '.join(revisions), S_UNSTABLE))
+        # New failures
+        print_new_failures()
 
 
 def parse_args():
