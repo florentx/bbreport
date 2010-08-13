@@ -37,6 +37,7 @@ CACHE_BUILDS = 50
 DEFAULT_BRANCHES = 'all'
 DEFAULT_TIMEOUT = 4
 MSG_MAXLENGTH = 60
+MAX_FAILURES = 30
 DEFAULT_OUTPUT = {}
 ANSI_COLOR = ['black', 'red', 'green', 'yellow',
               'blue', 'magenta', 'cyan', 'white']
@@ -196,12 +197,16 @@ def get_issue(test, message, builder):
                  if issue.match(test, message, builder)), None)
 
 
-def print_new_failures():
+def print_new_failures(verbose=False):
     if new_failures:
-        out('\nNew failures:')
-        for failure, revisions in sorted(new_failures.items()):
-            out('    ', ':'.join(failure),
-                cformat(' '.join(revisions), S_FAILURE))
+        count = len(new_failures)
+        if verbose or count <= MAX_FAILURES:
+            out('\n%s new test failure(s):' % count)
+            for failure, revisions in sorted(new_failures.items()):
+                out('    ', ':'.join(failure),
+                    cformat(' '.join(revisions), S_FAILURE))
+        else:
+            out('  and', cformat('%s new test failures' % count, S_FAILURE))
 
 
 def parse_builder_name(name):
@@ -937,7 +942,7 @@ class IssueOutput(AbstractOutput):
                 out(indent, ':'.join(failure),
                     cformat(' '.join(revisions), S_UNSTABLE))
         # New failures
-        print_new_failures()
+        print_new_failures(verbose=True)
 
 
 def parse_args():
