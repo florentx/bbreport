@@ -35,10 +35,12 @@ NUMBUILDS = 4
 XMLRPC_LIMIT = 5
 CACHE_BUILDS = 50
 DEFAULT_BRANCHES = 'all'
+DEFAULT_FAILURES = ''
 DEFAULT_TIMEOUT = 4
 MSG_MAXLENGTH = 60
 MAX_FAILURES = 30
 DEFAULT_OUTPUT = {}
+BUILD_ID = 'revision'
 ANSI_COLOR = ['black', 'red', 'green', 'yellow',
               'blue', 'magenta', 'cyan', 'white']
 
@@ -202,9 +204,9 @@ def print_new_failures(verbose=False):
         count = len(new_failures)
         if verbose or count <= MAX_FAILURES:
             out('\n%s new test failure(s):' % count)
-            for failure, revisions in sorted(new_failures.items()):
+            for failure, ids in sorted(new_failures.items()):
                 out('    ', ':'.join(failure),
-                    cformat(' '.join(revisions), S_FAILURE))
+                    cformat(' '.join(ids), S_FAILURE))
         else:
             out('  and', cformat('%s new test failures' % count, S_FAILURE))
 
@@ -398,6 +400,16 @@ class Build(object):
             self._get_failures()
         self.save()
 
+    @property
+    def id(self):
+        """The build identifier."""
+        return getattr(self, BUILD_ID)
+
+    @property
+    def url(self):
+        """The build URL."""
+        return self._url + str(self.num)
+
     def _get_build(self, args):
         # Load the build data from the cache, or online
         if self.num is not None:
@@ -432,11 +444,6 @@ class Build(object):
             if self._message is None or 'test' in self._message:
                 # Parse stdio on demand
                 self._parse_stdio()
-
-    @property
-    def url(self):
-        """Return the build URL."""
-        return self._url + str(self.num)
 
     def save(self):
         """Insert the build in the local cache."""
@@ -560,7 +567,7 @@ class Build(object):
                 else:
                     events = new_failures
                     failed_tests.append(test)
-                events.setdefault(event, []).append(str(self.revision))
+                events.setdefault(event, []).append(str(self.id))
             failed_count = len(failed_tests) + len(known)
             if self.result == S_EXCEPTION and failed_count > 2:
                 # disk full or other buildbot error
@@ -705,12 +712,12 @@ class BuilderOutput(AbstractOutput):
 
             result = build.result
 
-            if build.revision:
-                revision = '%5d' % build.revision
-                rev = revision if not compact else revision[-3:]
+            if build.id:
+                id = '%5d' % build.id
+                id = id if not compact else id[-3:]
             else:
-                rev = ' *** ' if not compact else '***'
-            capsule.append(cformat(rev, result, sep=''))
+                id = ' *** ' if not compact else '***'
+            capsule.append(cformat(id, result, sep=''))
 
             if result == S_BUILDING:
                 continue
@@ -755,7 +762,8 @@ class BuilderOutput(AbstractOutput):
 
         if not quiet:
             for build in display_builds:
-                out(' %5d:' % build.revision, build.get_message())
+                out('%4d %5d:' % (build.num, build.revision),
+                    build.get_message())
 
         return builder_status
 
@@ -938,9 +946,9 @@ class IssueOutput(AbstractOutput):
         for issue in sorted(known_issues, key=lambda m: -len(m.events)):
             out(issue)
             indent = ' ' * (len(issue.number) + 1)
-            for failure, revisions in sorted(issue.events.items()):
+            for failure, ids in sorted(issue.events.items()):
                 out(indent, ':'.join(failure),
-                    cformat(' '.join(revisions), S_UNSTABLE))
+                    cformat(' '.join(ids), S_UNSTABLE))
         # New failures
         print_new_failures(verbose=True)
 
@@ -949,7 +957,7 @@ def parse_args():
     """
     Create an option parser, parse the result and return options and args.
     """
-    global cformat
+    global BUILD_ID, cformat
 
     parser = optparse.OptionParser(version=__version__,
                                    usage="%prog [options] branch ...")
@@ -980,12 +988,18 @@ def parse_args():
     parser.add_option('--mode', default="builder", type="choice",
                       choices=("builder", "revision", "issue"),
                       help='output mode: "builder", "revision" or "issue"')
+    parser.add_option('--id', default="revision", type="choice",
+                      choices=("revision", "build"),
+                      help='build identifier: "revision" or "build"')
 
     options, args = parser.parse_args()
 
     if options.offline and options.no_database:
         out("--offline and --no-database don't go together")
         sys.exit(1)
+
+    if DEFAULT_FAILURES and not options.failures:
+        options.failures = DEFAULT_FAILURES.split()
 
     if options.failures:
         # ignore the -q option
@@ -994,6 +1008,10 @@ def parse_args():
     if options.no_color:
         # replace the colorizer
         cformat = _cformat_plain
+
+    if options.id == "build":
+        # Use the build number as identifier
+        BUILD_ID = "num"
 
     #print options, args
     return options, args
