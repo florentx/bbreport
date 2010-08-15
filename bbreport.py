@@ -84,7 +84,7 @@ RE_FAILED = re.compile(b('(\d+) tests? failed:((?:\r?\n? +([^\r\n]+))+)'))
 RE_TIMEOUT = re.compile(b('command timed out: (\d+) ([^,]+)'))
 RE_STOP = re.compile(b('(process killed by .+)'))
 RE_BBTEST = re.compile(b('make: \*\*\* \[buildbottest\] (.+)'))
-RE_TEST = re.compile(b('(test_[^ ]+)$'))
+RE_TEST = re.compile(b('(?:\[[^]]*\] )?(test_[^ ]+)$'))
 
 # Buildbot errors
 OSERRORS = (b('filesystem is full'),
@@ -328,6 +328,8 @@ class Builder(object):
 
     def remove_oldest(self):
         global removed_builds
+        if conn is None:
+            return
         if CACHE_BUILDS <= 0:
             return
         # Remove obsolete data
