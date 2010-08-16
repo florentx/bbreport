@@ -84,7 +84,7 @@ RE_FAILED = re.compile(b('(\d+) tests? failed:((?:\r?\n? +([^\r\n]+))+)'))
 RE_TIMEOUT = re.compile(b('command timed out: (\d+) ([^,]+)'))
 RE_STOP = re.compile(b('(process killed by .+)'))
 RE_BBTEST = re.compile(b('make: \*\*\* \[buildbottest\] (.+)'))
-RE_TEST = re.compile(b('(?:\[[^]]*\] )?(test_[^ ]+)$'))
+RE_TEST = re.compile(b('(?:\[[^]]*\] )?(test_[^ <]+)(?:</span>|$)'))
 
 # Buildbot errors
 OSERRORS = (b('filesystem is full'),
@@ -93,7 +93,6 @@ OSERRORS = (b('filesystem is full'),
 
 # HTML pollution in the stdio log
 HTMLNOISE = b('</span><span class="stdout">')
-HTMLHEADR = b('</span><span class="header">')
 
 # Format output
 SYMBOL = {S_SUCCESS: '_', S_FAILURE: '#', S_EXCEPTION: '?',
@@ -532,7 +531,7 @@ class Build(object):
             if killed:
                 self._message = u(killed.group(1).strip().lower())
                 # Check previous line for a possible timeout
-                line = next(reversed_lines).replace(HTMLHEADR, b(''))
+                line = next(reversed_lines)
 
             timeout = RE_TIMEOUT.search(line)
             if timeout:
@@ -541,7 +540,7 @@ class Build(object):
                 self.result = S_FAILURE
                 self._message = 'hung for %d min' % minutes
                 # Move to previous line
-                line = next(reversed_lines).replace(HTMLHEADR, b(''))
+                line = next(reversed_lines)
 
             failed = RE_TEST.match(line)
             if failed:
