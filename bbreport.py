@@ -86,13 +86,14 @@ RE_STOP = re.compile(b('(process killed by .+)'))
 RE_BBTEST = re.compile(b('make: \*\*\* \[buildbottest\] (.+)'))
 RE_TEST = re.compile(b('(?:\[[^]]*\] )?(test_[^ ]+)$'))
 
-# HTML pollution in the stdio log
-RE_HTMLNOISE = re.compile(b('</span><span class="(stdout|header)">'))
-
 # Buildbot errors
 OSERRORS = (b('filesystem is full'),
             b('No space left on device'),
             b('Cannot allocate memory'))
+
+# HTML pollution in the stdio log
+HTMLNOISE = b('</span><span class="stdout">')
+HTMLHEADR = b('</span><span class="header">')
 
 # Format output
 SYMBOL = {S_SUCCESS: '_', S_FAILURE: '#', S_EXCEPTION: '?',
@@ -497,7 +498,7 @@ class Build(object):
     def _parse_stdio(self):
         # Lookup failures in the stdio log on the server
         stdio = urlread(self.url + '/steps/test/logs/stdio')
-        stdio = RE_HTMLNOISE.sub(b(''), stdio)
+        stdio = stdio.replace(HTMLNOISE, b(''))
 
         # Check if some test failed
         fail = RE_FAILED.search(stdio)
@@ -531,7 +532,7 @@ class Build(object):
             if killed:
                 self._message = u(killed.group(1).strip().lower())
                 # Check previous line for a possible timeout
-                line = next(reversed_lines)
+                line = next(reversed_lines).replace(HTMLHEADR, b(''))
 
             timeout = RE_TIMEOUT.search(line)
             if timeout:
@@ -540,7 +541,7 @@ class Build(object):
                 self.result = S_FAILURE
                 self._message = 'hung for %d min' % minutes
                 # Move to previous line
-                line = next(reversed_lines)
+                line = next(reversed_lines).replace(HTMLHEADR, b(''))
 
             failed = RE_TEST.match(line)
             if failed:
