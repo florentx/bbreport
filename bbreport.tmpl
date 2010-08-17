@@ -1,0 +1,27 @@
+#summary Report buildbot failures. (sample output)
+
+_generated on %(changed)s_
+
+Data source: %(baseurl)s
+
+Analyzing last *%(count_build)s* builds for each builder.
+
+
+= New failures =
+
+%(count_new)s new test failure(s):
+
+|| *Test* || *Message* || *Builder* || *Revision(s)* ||
+%(new)s
+
+
+= Known issues =
+
+|| *Issue* || *Test* || *Message* || *Builder* || *Revision(s)* ||
+%(known)s
+
+
+= No recent failure =
+
+|| *Issue* || *Test* || *Message* || *Builder* ||
+%(gone)s
