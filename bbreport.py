@@ -13,6 +13,12 @@ import socket
 import sqlite3
 import sys
 from contextlib import closing
+from datetime import datetime
+
+try:
+    import simplejson as json
+except ImportError:
+    import json
 
 try:
     # Python 2.x
@@ -51,6 +57,8 @@ basefile = os.path.splitext(__file__)[0]
 conffile = basefile + '.conf'
 # Database file
 dbfile = basefile + '.cache'
+# Generated JSON file (option --mode json)
+jsonfile = basefile + '.json'
 
 # Database connection
 conn = None
@@ -204,9 +212,9 @@ def print_new_failures(verbose=False):
         count = len(new_failures)
         if verbose or count <= MAX_FAILURES:
             out('\n%s new test failure(s):' % count)
-            for failure, ids in sorted(new_failures.items()):
+            for failure, builds in sorted(new_failures.items()):
                 out('    ', ':'.join(failure),
-                    cformat(' '.join(ids), S_FAILURE))
+                    cformat(' '.join(str(b.id) for b in builds), S_FAILURE))
         else:
             out('  and', cformat('%s new test failures' % count, S_FAILURE))
 
@@ -569,7 +577,7 @@ class Build(object):
                 else:
                     events = new_failures
                     failed_tests.append(test)
-                events.setdefault(event, []).append(str(self.id))
+                events.setdefault(event, []).append(self)
             failed_count = len(failed_tests) + len(known)
             if self.result == S_EXCEPTION and failed_count > 2:
                 # disk full or other buildbot error
@@ -948,11 +956,69 @@ class IssueOutput(AbstractOutput):
         for issue in sorted(known_issues, key=lambda m: -len(m.events)):
             out(issue)
             indent = ' ' * (len(issue.number) + 1)
-            for failure, ids in sorted(issue.events.items()):
+            for failure, builds in sorted(issue.events.items()):
                 out(indent, ':'.join(failure),
-                    cformat(' '.join(ids), S_UNSTABLE))
+                    cformat(' '.join(str(b.id) for b in builds), S_UNSTABLE))
         # New failures
         print_new_failures(verbose=True)
+
+
+class JsonOutput(AbstractOutput):
+    """JSON output."""
+
+    def __init__(self, options):
+        AbstractOutput.__init__(self, options)
+        self.count_build = options.limit or NUMBUILDS
+
+    def add_builds(self, name, builds):
+        """Add builds for a builder."""
+        for build in builds:
+            if build is not None:
+                # Load the build results
+                build.get_message()
+
+    def display(self):
+        """Display result."""
+
+        def format_failure(failure, builds):
+            test, message, builder = failure
+            return {
+                'test': test,
+                'message': message,
+                'builder': builder,
+                'builds': [(b.num, b.revision) for b in builds],
+            }
+
+        # New failures
+        count_new = len(new_failures)
+        new = [format_failure(*f) for f in sorted(new_failures.items())]
+
+        # Known issues
+        known = []
+        gone = []
+        for issue in sorted(known_issues, key=lambda m: -len(m.events)):
+            test, message, builder = issue.rule
+            rv = {
+                'issue': issue.number,
+                'test': test,
+                'message': message,
+                'builder': builder,
+            }
+            if issue.events:
+                rv['failures'] = [format_failure(*f)
+                                  for f in sorted(issue.events.items())]
+                known.append(rv)
+            else:
+                gone.append(rv)
+        with open(jsonfile, 'w') as f:
+            json.dump({
+                'count_build': self.count_build,
+                'count_new': count_new,
+                'changed': datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC'),
+                'new': new,
+                'known': known,
+                'gone': gone,
+            }, f, indent=1, separators=(',', ': '))
 
 
 def parse_args():
@@ -988,7 +1054,7 @@ def parse_args():
     parser.add_option('--no-database', default=False, action='store_true',
                       help='do not cache the result in a database file')
     parser.add_option('--mode', default="builder", type="choice",
-                      choices=("builder", "revision", "issue"),
+                      choices=("builder", "revision", "issue", "json"),
                       help='output mode: "builder", "revision" or "issue"')
     parser.add_option('--id', default="revision", type="choice",
                       choices=("revision", "build"),
@@ -1130,6 +1196,8 @@ def main():
         output_class = RevisionOutput
     elif options.mode == "issue":
         output_class = IssueOutput
+    elif options.mode == "json":
+        output_class = JsonOutput
     else:
         output_class = BuilderOutput
     output = output_class(options)
