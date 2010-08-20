@@ -1021,7 +1021,7 @@ class JsonOutput(AbstractOutput):
                 'new': new,
                 'known': known,
                 'gone': gone,
-            }, f)
+            }, f, indent=1, separators=(',', ': '))
 
 
 class WikiOutput(AbstractOutput):
