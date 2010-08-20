@@ -1044,15 +1044,19 @@ class WikiOutput(AbstractOutput):
         def format_failure(failure, builds):
             test, message, builder = failure
             burl = baseurl + 'builders/' + urllib.quote(builder)
+            revs = []
+            for build in builds:
+                build_url = '%s/builds/%s' % (burl, build.num)
+                test_url = '%s/steps/test/logs/stdio' % build_url
+                rev = '[%s %s] ([%s tests])' % (build_url, build.revision, test_url)
+                revs.append(rev)
             return ('|| %(test)s || %(msg)s || [%(url)s %(builder)s] '
                     '|| %(revs)s ||' % {
                 'test': test,
                 'msg': message,
                 'url': burl,
                 'builder': builder,
-                'revs': ' '.join('[%s/builds/%s %s]' %
-                                 (burl, b.num, b.revision)
-                                 for b in builds)
+                'revs': ' '.join(revs),
             })
 
         # New failures
@@ -1086,6 +1090,7 @@ class WikiOutput(AbstractOutput):
                 'known': '\n'.join(known),
                 'gone': '\n'.join(gone)
             }))
+        print("Report written to %s" % wikifile)
 
 
 def parse_args():
