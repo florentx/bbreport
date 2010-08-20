@@ -33,6 +33,13 @@ except ImportError:
     import xmlrpc.client as xmlrpclib
     from configparser import ConfigParser
 
+try:
+    # ANSI color support on Windows
+    import colorama
+    colorama.init()
+except ImportError:
+    pass
+
 __version__ = '0.1dev'
 
 # Default number of builds
