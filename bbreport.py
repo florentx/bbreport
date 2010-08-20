@@ -747,9 +747,12 @@ class BuilderOutput(AbstractOutput):
                 failed_builds.append(build)
                 display_builds.append(build)
 
+        is_active = ((builds[0] and builds[0].revision) or
+                     count[S_SUCCESS] > 0 or count[S_FAILURE] > 0)
+
         if quiet > 1:
             # Print only the colored buildbot names
-            if 0 == count[S_SUCCESS] == count[S_FAILURE]:
+            if not is_active:
                 return S_OFFLINE
             last_result = builds[0].result
             if last_result in (S_SUCCESS, S_BUILDING):
@@ -757,11 +760,11 @@ class BuilderOutput(AbstractOutput):
             return S_FAILURE
 
         if count[S_SUCCESS] == 0:
-            if count[S_FAILURE] == 0:
+            if is_active:
+                builder_status = S_FAILURE
+            else:
                 builder_status = S_OFFLINE
                 capsule = [cformat(' *** ', S_OFFLINE, sep='')] * 2
-            else:
-                builder_status = S_FAILURE
         elif count[S_FAILURE] > 0:
             builder_status = S_UNSTABLE
         else:
@@ -1223,12 +1226,12 @@ def main():
 
             builds = list(builder.get_builds(numbuilds, *xmlrpcbuilds))
 
-        # fill the build list with None for missing builds.
-        builds.extend([None] * (numbuilds - len(builds)))
-
         # filter by revision number
         if options.revision:
-            builds = [build for build in builds if build.revision >= options.revision]
+            builds = [b for b in builds if b.revision >= options.revision]
+
+        # fill the build list with None for missing builds.
+        builds.extend([None] * (numbuilds - len(builds)))
 
         if (options.failures and
             not any(build is not None and build.failed_tests and
