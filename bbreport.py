@@ -16,6 +16,11 @@ from contextlib import closing
 from datetime import datetime
 
 try:
+    import simplejson as json
+except ImportError:
+    import json
+
+try:
     # Python 2.x
     import urllib2
     import urllib
@@ -55,6 +60,7 @@ conffile = basefile + '.conf'
 dbfile = basefile + '.cache'
 # Template file
 tmpl = basefile + '.tmpl'
+jsonfile = basefile + '.json'
 wikifile = basefile + '.wiki'
 
 # Database connection
@@ -960,6 +966,64 @@ class IssueOutput(AbstractOutput):
         print_new_failures(verbose=True)
 
 
+class JsonOutput(AbstractOutput):
+    """JSON output."""
+
+    def __init__(self, options):
+        AbstractOutput.__init__(self, options)
+        self.count_build = options.limit or NUMBUILDS
+
+    def add_builds(self, name, builds):
+        """Add builds for a builder."""
+        for build in builds:
+            if build is not None:
+                # Load the build results
+                build.get_message()
+
+    def display(self):
+        """Display result."""
+
+        def format_failure(failure, builds):
+            test, message, builder = failure
+            return {
+                'test': test,
+                'message': message,
+                'builder': builder,
+                'builds': [(b.num, b.revision) for b in builds],
+            }
+
+        # New failures
+        count_new = len(new_failures)
+        new = [format_failure(*f) for f in sorted(new_failures.items())]
+
+        # Known issues
+        known = []
+        gone = []
+        for issue in sorted(known_issues, key=lambda m: -len(m.events)):
+            test, message, builder = issue.rule
+            rv = {
+                'issue': issue.number,
+                'test': test,
+                'message': message,
+                'builder': builder,
+            }
+            if issue.events:
+                rv['failures'] = [format_failure(*f)
+                                  for f in sorted(issue.events.items())]
+                known.append(rv)
+            else:
+                gone.append(rv)
+        with open(jsonfile, 'w') as f:
+            json.dump({
+                'count_build': self.count_build,
+                'count_new': count_new,
+                'changed': datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC'),
+                'new': new,
+                'known': known,
+                'gone': gone,
+            }, f)
+
+
 class WikiOutput(AbstractOutput):
     """Alternative output for the Google Code wiki."""
 
@@ -1057,7 +1121,7 @@ def parse_args():
     parser.add_option('--no-database', default=False, action='store_true',
                       help='do not cache the result in a database file')
     parser.add_option('--mode', default="builder", type="choice",
-                      choices=("builder", "revision", "issue", "wiki"),
+                      choices=("builder", "revision", "issue", "json", "wiki"),
                       help='output mode: "builder", "revision" or "issue"')
     parser.add_option('--id', default="revision", type="choice",
                       choices=("revision", "build"),
@@ -1196,6 +1260,8 @@ def main():
         output_class = RevisionOutput
     elif options.mode == "issue":
         output_class = IssueOutput
+    elif options.mode == "json":
+        output_class = JsonOutput
     elif options.mode == "wiki":
         output_class = WikiOutput
     else:
