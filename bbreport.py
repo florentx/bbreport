@@ -993,6 +993,9 @@ def parse_args():
     parser.add_option('--id', default="revision", type="choice",
                       choices=("revision", "build"),
                       help='build identifier: "revision" or "build"')
+    parser.add_option('-r', '--revision',
+                      help='Minimum revision number',
+                      type='int', default=None)
 
     options, args = parser.parse_args()
 
@@ -1147,6 +1150,10 @@ def main():
 
         # fill the build list with None for missing builds.
         builds.extend([None] * (numbuilds - len(builds)))
+
+        # filter by revision number
+        if options.revision:
+            builds = [build for build in builds if build.revision >= options.revision]
 
         if (options.failures and
             not any(build is not None and build.failed_tests and
