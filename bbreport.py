@@ -966,7 +966,7 @@ class IssueOutput(AbstractOutput):
                 # Load the build results
                 build.get_message()
                 broken = False
-            elif broken and not msg:
+            elif broken and not msg and build.result != S_BUILDING:
                 msg = build.get_message()
         if broken:
             if not msg:
