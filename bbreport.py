@@ -952,13 +952,34 @@ class IssueOutput(AbstractOutput):
     def __init__(self, options):
         AbstractOutput.__init__(self, options)
         out("... retrieving build results")
+        self.broken = {}
+        self.count_build = options.limit or NUMBUILDS
 
     def add_builds(self, name, builds):
         """Add builds for a builder."""
-        for build in builds:
-            if build is not None:
+        broken = True
+        msg = None
+        for build in filter(None, builds):
+            if build.result == S_SUCCESS:
+                broken = False
+            elif build.failed_tests:
                 # Load the build results
                 build.get_message()
+                broken = False
+            elif broken and not msg:
+                msg = build.get_message()
+        if broken:
+            if not msg:
+                msg = SYMBOL[S_OFFLINE] + ' ' + S_OFFLINE
+            try:
+                host, branch = name.rsplit(None, 1)
+            except ValueError:
+                host, branch = name, ''
+            host = self.broken.setdefault(host, {'branches': [],
+                                                 'messages': []})
+            host['branches'].append(branch)
+            if not msg in host['messages']:
+                host['messages'].append(msg)
 
     def display(self):
         """Display result."""
@@ -971,21 +992,21 @@ class IssueOutput(AbstractOutput):
                     cformat(' '.join(str(b.id) for b in builds), S_UNSTABLE))
         # New failures
         print_new_failures(verbose=True)
+        out()
+        # Broken builders
+        self.print_broken_builders()
+
+    def print_broken_builders(self):
+        """Broken buildbots."""
+        out(S_OFFLINE.title() + ':')
+        for host, builder in sorted(self.broken.items()):
+            branches = cformat(' '.join(builder['branches']), S_OFFLINE)
+            messages = ', '.join(builder['messages'])
+            out('\t' + host, branches + ':', messages)
 
 
-class JsonOutput(AbstractOutput):
-    """JSON output."""
-
-    def __init__(self, options):
-        AbstractOutput.__init__(self, options)
-        self.count_build = options.limit or NUMBUILDS
-
-    def add_builds(self, name, builds):
-        """Add builds for a builder."""
-        for build in builds:
-            if build is not None:
-                # Load the build results
-                build.get_message()
+class JsonOutput(IssueOutput):
+    """JSON output, subclass of IssueOutput."""
 
     def display(self):
         """Display result."""
@@ -998,10 +1019,6 @@ class JsonOutput(AbstractOutput):
                 'builder': builder,
                 'builds': [(b.num, b.revision) for b in builds],
             }
-
-        # New failures
-        count_new = len(new_failures)
-        new = [format_failure(*f) for f in sorted(new_failures.items())]
 
         # Known issues
         known = []
@@ -1020,6 +1037,18 @@ class JsonOutput(AbstractOutput):
                 known.append(rv)
             else:
                 gone.append(rv)
+
+        # New failures
+        count_new = len(new_failures)
+        new = [format_failure(*f) for f in sorted(new_failures.items())]
+
+        # Broken builders
+        broken = [{
+            'host': host,
+            'branches': builder['branches'],
+            'messages': builder['messages'],
+        } for host, builder in sorted(self.broken.items())]
+
         with open(jsonfile, 'w') as f:
             json.dump({
                 'count_build': self.count_build,
@@ -1028,6 +1057,7 @@ class JsonOutput(AbstractOutput):
                 'new': new,
                 'known': known,
                 'gone': gone,
+                'broken': broken,
             }, f, indent=1, separators=(',', ': '))
 
 
