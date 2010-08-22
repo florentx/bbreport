@@ -997,12 +997,12 @@ class IssueOutput(AbstractOutput):
         self.print_broken_builders()
 
     def print_broken_builders(self):
-        """Broken buildbots."""
-        out(S_OFFLINE.title() + ':')
+        """Print broken and offline builders."""
+        out('Broken builders:')
         for host, builder in sorted(self.broken.items()):
             branches = cformat(' '.join(builder['branches']), S_OFFLINE)
             messages = ', '.join(builder['messages'])
-            out('\t' + host, branches + ':', messages)
+            out('\t' + host, branches, messages)
 
 
 class JsonOutput(IssueOutput):
