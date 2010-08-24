@@ -69,9 +69,6 @@ jsonfile = basefile + '.json'
 
 # Database connection
 conn = None
-# Issues
-known_issues = []
-new_failures = {}
 # Count removed builds
 removed_builds = 0
 
@@ -118,13 +115,20 @@ COLOR = {S_SUCCESS: 'green', S_FAILURE: 'red', S_EXCEPTION: 'yellow',
 
 _escape_sequence = {}
 
-# Compatibility with Python 2.5
+
+# ~~ Compatibility with Python 2.5 ~~
+
 if not hasattr(sqlite3.Connection, 'iterdump'):
     try:
         from pysqlite2 import dbapi2 as sqlite3
         sqlite3.Connection.iterdump
     except (ImportError, AttributeError):
         sys.exit("*** Requires pysqlite 2.5.0 or Python >= 2.6")
+
+try:
+    from collections import MutableMapping
+except ImportError:
+    from UserDict import DictMixin as MutableMapping
 
 try:
     next
@@ -142,6 +146,9 @@ except AttributeError:
     def out(*args, **kw):
         sys.stdout.write(' '.join(str(arg) for arg in args) +
                          kw.get('end', '\n'))
+
+
+# ~~ Helpers ~~
 
 
 def exc():
@@ -209,23 +216,6 @@ def urlread(url):
         return b('')
 
 
-def get_issue(test, message, builder):
-    return next((issue for issue in known_issues
-                 if issue.match(test, message, builder)), None)
-
-
-def print_new_failures(verbose=False):
-    if new_failures:
-        count = len(new_failures)
-        if verbose or count <= MAX_FAILURES:
-            out('\n%s new test failure(s):' % count)
-            for failure, builds in sorted(new_failures.items()):
-                out('    ', ':'.join(failure),
-                    cformat(' '.join(str(b.id) for b in builds), S_FAILURE))
-        else:
-            out('  and', cformat('%s new test failures' % count, S_FAILURE))
-
-
 def parse_builder_name(name):
     try:
         # the branch name should always be the last part of the name
@@ -236,6 +226,9 @@ def parse_builder_name(name):
             # FIXME: fix buildbot names? :-)
             branch = name[:-4]
     return host, branch
+
+
+# ~~ Builder and Build classes ~~
 
 
 class Builder(object):
@@ -258,8 +251,8 @@ class Builder(object):
         """Return the builders from the database, as a dict."""
         if conn is None:
             return {}
-        cur = conn.execute('select builder from builders where status '
-                           'is null or status <> ?', (S_MISSING,))
+        cur = conn.execute('SELECT builder FROM builders WHERE status '
+                           'IS NULL OR status <> ?', (S_MISSING,))
         return dict((name, cls(name)) for (name,) in cur.fetchall())
 
     def get_builds(self, n, *builds):
@@ -303,8 +296,8 @@ class Builder(object):
         """Retrieve the last n builds from the local cache."""
         if conn is None:
             return []
-        cur = conn.execute('select build from builds where builder = ? '
-                           'order by build desc limit ?', (self.name, n))
+        cur = conn.execute('SELECT build FROM builds WHERE builder = ? '
+                           'ORDER BY build DESC LIMIT ?', (self.name, n))
         builds = [Build(self.name, num) for (num,) in cur.fetchall()]
         self.add(*builds)
         return builds
@@ -319,7 +312,7 @@ class Builder(object):
         """Populate the builder attributes from the local cache."""
         if conn is None:
             return
-        row = conn.execute('select lastbuild, status from builders where '
+        row = conn.execute('SELECT lastbuild, status FROM builders WHERE '
                            'builder = ? ', (self.name,)).fetchone()
         if row is not None:
             self.saved = True
@@ -349,7 +342,7 @@ class Builder(object):
             return
         # Remove obsolete data
         minbuild = self.lastbuild - CACHE_BUILDS
-        cur = conn.execute('delete from builds where builder = ? and '
+        cur = conn.execute('DELETE FROM builds WHERE builder = ? AND '
                            'build < ?', (self.name, minbuild))
         if cur.rowcount:
             removed_builds += cur.rowcount
@@ -359,43 +352,16 @@ class Builder(object):
         if conn is None:
             return
         if self.saved:
-            conn.execute('update builders set lastbuild = ?, status = ? '
-                         'where builder = ?',
+            conn.execute('UPDATE builders SET lastbuild = ?, status = ? '
+                         'WHERE builder = ?',
                          (self.lastbuild, self.status, self.name))
         else:
-            conn.execute('insert into builders(builder, host, branch, '
-                         'lastbuild, status) values (?, ?, ?, ?, ?)',
+            conn.execute('INSERT INTO builders(builder, host, branch, '
+                         'lastbuild, status) VALUES (?, ?, ?, ?, ?)',
                          (self.name, self.host, self.branch,
                           self.lastbuild, self.status))
             self.saved = True
         return True
-
-
-class MatchIssue(object):
-    """Represent an issue from the issue tracker."""
-
-    def __init__(self, number, test='', message='', builder=''):
-        if not (test or message or builder):
-            raise Exception('MatchIssue needs a test or a message '
-                            'or a builder regex')
-        self.number = number
-        self.rule = (test, message, builder)
-        self.events = {}
-        # Match the failed test exactly
-        if test and not test.endswith('$'):
-            test += '$'
-        self.test = re.compile(test)
-        self.message = re.compile(message)
-        self.builder = re.compile(builder)
-
-    def __repr__(self):
-        return '%s: %s:%s:%s' % ((self.number,) + self.rule)
-
-    def match(self, test, message, builder):
-        """Check if the failure attributes match the issue criteria."""
-        return all((self.test.match(test),
-                    self.message.match(message),
-                    self.builder.match(builder)))
 
 
 class Build(object):
@@ -447,14 +413,14 @@ class Build(object):
         if not self.result:
             # Fallback to the web page
             self.result = self._parse_build()
-        if self._message in ('failed svn',):
+        if self._message and self._message.startswith('failed svn'):
             self.result = S_EXCEPTION
 
     def _get_failures(self):
         # Load the failures from the cache, or parse the stdio log
         if self.saved and conn is not None:
-            cur = conn.execute('select failed from failures where '
-                               'builder = ? and build = ?',
+            cur = conn.execute('SELECT failed FROM failures WHERE '
+                               'builder = ? AND build = ?',
                                (self.builder, self.num))
             self.failed_tests = [test for (test,) in cur.fetchall()]
         else:
@@ -468,14 +434,14 @@ class Build(object):
             return
         if self.result not in (S_SUCCESS, S_FAILURE, S_EXCEPTION):
             return False
-        conn.execute('insert into builds(builder, build, revision, result, '
-                     'message) values (?, ?, ?, ?, ?)', (self.builder,
+        conn.execute('INSERT INTO builds(builder, build, revision, result, '
+                     'message) VALUES (?, ?, ?, ?, ?)', (self.builder,
                      self.num, self.revision, self.result, self._message))
         if self.failed_tests:
             rows = ((self.builder, self.num, test)
                     for test in self.failed_tests)
-            conn.executemany('insert into failures(builder, build, failed) '
-                             'values (?, ?, ?)', rows)
+            conn.executemany('INSERT INTO failures(builder, build, failed) '
+                             'VALUES (?, ?, ?)', rows)
         self.saved = True
         return True
 
@@ -483,8 +449,8 @@ class Build(object):
         # Load revision, result and message from the local cache
         result = None
         if conn is not None and self.num >= 0:
-            row = conn.execute('select revision, result, message from builds'
-                               ' where builder = ? and build = ?',
+            row = conn.execute('SELECT revision, result, message FROM builds'
+                               ' WHERE builder = ? AND build = ?',
                                (self.builder, self.num)).fetchone()
             if row is not None:
                 self.saved = True
@@ -572,19 +538,7 @@ class Build(object):
             return cformat(self.result, self.result)
         msg = self._message
         if self.failed_tests:
-            failed_tests = []
-            known = []
-            for test in self.failed_tests:
-                event = (test, msg, self.builder)
-                issue = get_issue(*event)
-                if issue:
-                    events = issue.events
-                    test += '`%s' % issue.number
-                    known.append(test)
-                else:
-                    events = new_failures
-                    failed_tests.append(test)
-                events.setdefault(event, []).append(self)
+            failed_tests, known = issues.match(self)
             failed_count = len(failed_tests) + len(known)
             if self.result == S_EXCEPTION and failed_count > 2:
                 # disk full or other buildbot error
@@ -602,77 +556,145 @@ class Build(object):
         return SYMBOL[self.result] + ' ' + msg
 
 
-def load_configuration():
-    # Load the configuration from the file
-    conf = ConfigParser()
-    conf.read(conffile)
-    sections = conf.sections()
-    if 'global' in sections:
-        glow = dict((k.lower(), k) for k in globals())
-        for k, v in conf.items('global'):
-            key = glow.get(k.lower())
-            if key:
-                conv = type(globals()[key])  # int or str
-                globals()[key] = conv(v)
-    if 'output' in sections:
-        DEFAULT_OUTPUT.update(conf.items('output'))
-    if 'colors' in sections:
-        COLOR.update(conf.items('colors'))
-    if 'symbols' in sections:
-        SYMBOL.update(conf.items('symbols'))
-    # Prepare the output colors
-    prepare_output()
-    socket.setdefaulttimeout(DEFAULT_TIMEOUT)
-    if 'issues' not in sections:
-        return
-    # Load the known issues
-    for num, rule in conf.items('issues'):
-        args = (arg.strip() for arg in rule.split(':'))
-        known_issues.append(MatchIssue(num, *args))
+# ~~ Issues ~~
 
 
-def upgrade_dbfile():
-    # Placeholder for future database migration
-    legacy_dbfile = basefile + '.sqlite'
-    if os.path.exists(legacy_dbfile):
-        os.unlink(legacy_dbfile)
+class Rule(object):
+    """Represent a matching rule for an issue."""
+
+    def __init__(self, test='', message='', builder=''):
+        if not (test or message or builder):
+            raise TypeError('A Rule needs a test or a message '
+                            'or a builder regex')
+        self.rule = (test, message, builder)
+        # Match the failed test exactly
+        if test and not test.endswith('$'):
+            test += '$'
+        self.test = re.compile(test)
+        self.message = re.compile(message)
+        self.builder = re.compile(builder)
+
+    def __str__(self):
+        return '%s:%s:%s' % self.rule
+
+    def __eq__(self, other):
+        return hasattr(other, 'rule') and self.rule == other.rule
+
+    def match(self, test, message, builder):
+        """Check if the failure attributes match the issue criteria."""
+        return all((self.test.match(test),
+                    self.message.match(message),
+                    self.builder.match(builder)))
 
 
-def load_database():
-    # Upgrade the database file format
-    upgrade_dbfile()
-    global conn
-    if conn is None:
-        conn = sqlite3.connect(':memory:')
-    if os.path.exists(dbfile):
-        # Load the database in memory
-        with closing(gzip.open(dbfile, 'rb')) as f:
-            conn.executescript(u(f.read()))
-    else:
-        # Initialize the tables
-        conn.execute('create table builders'
-                     '(builder, host, branch, lastbuild, status)')
-        conn.execute('create table builds'
-                     '(builder, build, revision, result, message)')
-        conn.execute('create table failures'
-                     '(builder, build, failed)')
+class MatchIssue(object):
+    """Represent an issue from the issue tracker."""
+
+    def __init__(self, number, *rules):
+        self.number = number
+        self.rules = [Rule(*rule) for rule in rules]
+        self.events = {}
+
+    def __str__(self):
+        lines = []
+        out = lines.append
+
+        for rule in self.rules:
+            out('%s: %s' % (self.number, rule))
+        indent = ' ' * (len(self.number) + 2)
+        for failure, builds in sorted(self.events.items()):
+            out(indent + ':'.join(failure) + ' ' +
+                cformat(' '.join(str(b.id) for b in builds), S_UNSTABLE))
+
+        return '\n'.join(lines)
+
+    def add(self, rule):
+        rule = Rule(*rule)
+        if rule not in self.rules:
+            self.rules.append(rule)
+
+    def match(self, build, *event):
+        """Check if the failure attributes match any issue criteria."""
+        rv = any(rule.match(*event) for rule in self.rules)
+        if rv:
+            self.events.setdefault(event, []).append(build)
+        return rv
 
 
-def prune_database():
-    if removed_builds:
-        out('Removed %s ancient builds' % removed_builds)
-        # Now purge the failures
-        conn.execute('delete from failures where builder||":"||build '
-                     'not in (select builder||":"||build from builds)')
+class Issues(dict, MutableMapping):
+    """Ordered dictionary of issues from the issue tracker."""
+
+    def __init__(self, *args, **kw):
+        self.__keys = []
+        self.new_events = {}
+        self.update(*args, **kw)
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self[key].add(value)
+        else:
+            self.__keys.append(key)
+            dict.__setitem__(self, key, MatchIssue(key, value))
+
+    def __iter__(self):
+        return iter(self.__keys)
+
+    try:
+        items = MutableMapping.iteritems
+    except AttributeError:
+        # Python 3
+        items = MutableMapping.items
+
+    def values(self):
+        """Return the issues by number of events descending."""
+        return sorted(dict.values(self), key=lambda m: -len(m.events))
+
+    def match(self, build):
+        msg = build._message
+        builder = build.builder
+        known = []
+        new = []
+        new_events = self.new_events
+        for test in build.failed_tests:
+            event = (test, msg, builder)
+            issue = next((number for number, issue in self.items()
+                          if issue.match(build, test, msg, builder)), False)
+            if issue:
+                test += '`%s' % issue
+                known.append(test)
+            else:
+                new.append(test)
+                new_events.setdefault(event, []).append(build)
+        return new, known
+
+    def new_failures(self, verbose=False):
+        lines = []
+        out = lines.append
+
+        new_failures = self.new_events
+        if new_failures:
+            count = len(new_failures)
+            if verbose or count <= MAX_FAILURES:
+                out('\n%s new test failure(s):' % count)
+                for failure, builds in sorted(new_failures.items()):
+                    out('     ' + ':'.join(failure) + ' ' +
+                        cformat(' '.join(str(b.id) for b in builds),
+                                S_FAILURE))
+            else:
+                out('  and ' +
+                    cformat('%s new test failures' % count, S_FAILURE))
+
+        return '\n'.join(lines)
+
+    def __str__(self):
+        return ('\n'.join(str(issue) for issue in self.values()) + '\n' +
+                self.new_failures(verbose=True))
+
+# Instanciate a global Issues dictionary
+issues = Issues()
 
 
-def dump_database():
-    # Backup previous dump (and overwrite existing backup)
-    if os.path.exists(dbfile):
-        shutil.move(dbfile, dbfile + '.bak')
-    # Dump the database
-    with closing(gzip.open(dbfile, 'wb')) as f:
-        f.writelines(b(l + os.linesep) for l in conn.iterdump())
+# ~~ Output classes ~~
 
 
 class AbstractOutput(object):
@@ -807,7 +829,7 @@ class BuilderOutput(AbstractOutput):
 
         # Show the summary at the bottom
         out('Totals:', ' + '.join(totals))
-        print_new_failures()
+        out(issues.new_failures())
 
     def _group_by_status(self):
         for status in BUILDER_STATUSES:
@@ -895,28 +917,22 @@ class RevisionOutput(AbstractOutput):
 
     def format_build(self, build):
         msg = build.builder
+        length = 2048
         if build.result not in (S_SUCCESS, S_BUILDING):
             if build.result == S_EXCEPTION and (not self.options.verbose):
                 # Hide exceptions
                 return None
             build_message = build._message
             if build.failed_tests:
-                tests = []
-                unknown = False
-                for test in build.failed_tests:
-                    issue = get_issue(test, build_message, build.builder)
-                    if issue:
-                        if self.options.quiet:
-                            continue
-                        test += '`%s' % issue.number
-                    else:
-                        unknown = True
-                        test = cformat(test, build.result)
-                    tests.append(test)
-                if not tests:
+                new_events, known = issues.match(build)
+                if new_events:
+                    (text, length) = trunc(new_events, length)
+                    msg += ':' + cformat(text, S_FAILURE, sep='')
+                elif self.options.quiet:
                     # Hide known failures
                     return None
-                msg += ':' + trunc(tests, 2048)[0]
+                if known:
+                    msg += trunc(known, length)[0]
             else:
                 msg += ': "%s"' % build_message
         else:
@@ -958,7 +974,7 @@ class IssueOutput(AbstractOutput):
     def add_builds(self, name, builds):
         """Add builds for a builder."""
         broken = True
-        msg = None
+        messages = []
         for build in filter(None, builds):
             if build.result == S_SUCCESS:
                 broken = False
@@ -966,11 +982,11 @@ class IssueOutput(AbstractOutput):
                 # Load the build results
                 build.get_message()
                 broken = False
-            elif broken and not msg and build.result != S_BUILDING:
-                msg = build.get_message()
+            elif broken and build.result != S_BUILDING:
+                messages.append(build.get_message())
         if broken:
-            if not msg:
-                msg = SYMBOL[S_OFFLINE] + ' ' + S_OFFLINE
+            if not messages:
+                messages.append(SYMBOL[S_OFFLINE] + ' ' + S_OFFLINE)
             try:
                 host, branch = name.rsplit(None, 1)
             except ValueError:
@@ -978,21 +994,16 @@ class IssueOutput(AbstractOutput):
             host = self.broken.setdefault(host, {'branches': [],
                                                  'messages': []})
             host['branches'].append(branch)
-            if not msg in host['messages']:
-                host['messages'].append(msg)
+            for msg in messages:
+                if msg not in host['messages']:
+                    host['messages'].append(msg)
 
     def display(self):
         """Display result."""
-        # Known issues
-        for issue in sorted(known_issues, key=lambda m: -len(m.events)):
-            out(issue)
-            indent = ' ' * (len(issue.number) + 1)
-            for failure, builds in sorted(issue.events.items()):
-                out(indent, ':'.join(failure),
-                    cformat(' '.join(str(b.id) for b in builds), S_UNSTABLE))
-        # New failures
-        print_new_failures(verbose=True)
+        # Known issues and new failures
+        out(issues)
         out()
+
         # Broken builders
         self.print_broken_builders()
 
@@ -1023,14 +1034,14 @@ class JsonOutput(IssueOutput):
         # Known issues
         known = []
         gone = []
-        for issue in sorted(known_issues, key=lambda m: -len(m.events)):
-            test, message, builder = issue.rule
+        for issue in issues.values():
             rv = {
                 'issue': issue.number,
-                'test': test,
-                'message': message,
-                'builder': builder,
+                'rules': [{'test': test, 'message': msg, 'builder': builder}
+                          for test, msg, builder in issue.rules],
             }
+            # XXX backward compatibility
+            rv.update(rv['rules'][0])
             if issue.events:
                 rv['failures'] = [format_failure(*f)
                                   for f in sorted(issue.events.items())]
@@ -1039,6 +1050,7 @@ class JsonOutput(IssueOutput):
                 gone.append(rv)
 
         # New failures
+        new_failures = issues.new_events
         count_new = len(new_failures)
         new = [format_failure(*f) for f in sorted(new_failures.items())]
 
@@ -1061,12 +1073,48 @@ class JsonOutput(IssueOutput):
             }, f, indent=1, separators=(',', ': '))
 
 
+# ~~ Local cache ~~
+
+
+def load_database():
+    global conn
+    if conn is None:
+        conn = sqlite3.connect(':memory:')
+    if os.path.exists(dbfile):
+        # Load the database in memory
+        with closing(gzip.open(dbfile, 'rb')) as f:
+            conn.executescript(u(f.read()))
+    # Initialize or upgrade the tables
+    for table in ('builders(builder, host, branch, lastbuild, status)',
+                  'builds(builder, build, revision, result, message)',
+                  'failures(builder, build, failed)'):
+        conn.execute('CREATE TABLE IF NOT EXISTS ' + table)
+
+
+def prune_database():
+    if removed_builds:
+        out('Removed %s ancient builds' % removed_builds)
+        # Now purge the failures
+        conn.execute('DELETE FROM failures WHERE builder||":"||build '
+                     'NOT IN (SELECT builder||":"||build FROM builds)')
+
+
+def dump_database():
+    # Backup previous dump (and overwrite existing backup)
+    if os.path.exists(dbfile):
+        shutil.move(dbfile, dbfile + '.bak')
+    # Dump the database
+    with closing(gzip.open(dbfile, 'wb')) as f:
+        f.writelines(b(l + os.linesep) for l in conn.iterdump())
+
+
+# ~~ Application configuration ~~
+
+
 def parse_args():
     """
     Create an option parser, parse the result and return options and args.
     """
-    global BUILD_ID, cformat
-
     parser = optparse.OptionParser(version=__version__,
                                    usage="%prog [options] branch ...")
     parser.add_option('-n', '--name', dest='name', default=None,
@@ -1109,6 +1157,44 @@ def parse_args():
         out("--offline and --no-database don't go together")
         sys.exit(1)
 
+    return options, args
+
+
+def configure():
+    global BUILD_ID, cformat
+
+    # Parse command line arguments
+    options, args = parse_args()
+
+    # Load the configuration from the file
+    conf = ConfigParser()
+    conf.read(conffile)
+    sections = conf.sections()
+    if 'global' in sections:
+        glow = dict((k.lower(), k) for k in globals())
+        for k, v in conf.items('global'):
+            key = glow.get(k.lower())
+            if key:
+                conv = type(globals()[key])  # int or str
+                globals()[key] = conv(v)
+    if 'output' in sections:
+        DEFAULT_OUTPUT.update(conf.items('output'))
+    if 'colors' in sections:
+        COLOR.update(conf.items('colors'))
+    if 'symbols' in sections:
+        SYMBOL.update(conf.items('symbols'))
+    # Prepare the output colors
+    prepare_output()
+    socket.setdefaulttimeout(DEFAULT_TIMEOUT)
+    if 'issues' not in sections:
+        return
+    # Load the known issues
+    for num, val in conf.items('issues'):
+        rule = tuple(arg.strip() for arg in val.split(':'))
+        issues[num] = rule
+
+    # Tweak configuration
+
     if DEFAULT_FAILURES and not options.failures:
         options.failures = DEFAULT_FAILURES.split()
 
@@ -1124,15 +1210,18 @@ def parse_args():
         # Use the build number as identifier
         BUILD_ID = "num"
 
-    #print options, args
+    # out(options, args)
     return options, args
+
+
+# ~~ Main function ~~
 
 
 def main():
     global conn
 
-    load_configuration()
-    options, args = parse_args()
+    # Load configuration
+    options, args = configure()
 
     if not options.no_database:
         try:
