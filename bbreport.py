@@ -1196,6 +1196,9 @@ def parse_args():
     parser.add_option('-l', '--limit', default=0, type="int",
                       help='limit the number of builds per builder '
                            '(default: %s)' % NUMBUILDS)
+    parser.add_option('-r', '--revision',
+                      help='minimum revision number',
+                      type='int', default=None)
     parser.add_option('-v', '--verbose', default=0, action='count',
                       help='display also success')
     parser.add_option('-q', '--quiet', default=0, action='count',
@@ -1212,9 +1215,8 @@ def parse_args():
     parser.add_option('--id', default="revision", type="choice",
                       choices=("revision", "build"),
                       help='build identifier: "revision" or "build"')
-    parser.add_option('-r', '--revision',
-                      help='Minimum revision number',
-                      type='int', default=None)
+    parser.add_option('--conf', default=conffile,
+                      metavar='FILE', help='configuration file')
 
     options, args = parser.parse_args()
 
@@ -1233,7 +1235,7 @@ def configure():
 
     # Load the configuration from the file
     conf = ConfigParser()
-    conf.read(conffile)
+    conf.read(options.conf)
     sections = conf.sections()
     if 'global' in sections:
         glow = dict((k.lower(), k) for k in globals())
