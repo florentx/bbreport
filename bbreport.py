@@ -560,32 +560,28 @@ class Build(object):
 # ~~ Issues ~~
 
 
-class Rule(object):
+class Rule(tuple):
     """Represent a matching rule for an issue."""
 
-    def __init__(self, test='', message='', builder=''):
+    def __new__(cls, test='', message='', builder=''):
         if not (test or message or builder):
             raise TypeError('A Rule needs a test or a message '
                             'or a builder regex')
-        self.rule = (test, message, builder)
+        return tuple.__new__(cls, (test, message, builder))
+
+    def __init__(self, test, message, builder):
         # Match the failed test exactly
         if test and not test.endswith('$'):
             test += '$'
-        self.test = re.compile(test)
-        self.message = re.compile(message)
-        self.builder = re.compile(builder)
-
-    def __str__(self):
-        return '%s:%s:%s' % self.rule
-
-    def __eq__(self, other):
-        return hasattr(other, 'rule') and self.rule == other.rule
+        self.test_re = re.compile(test)
+        self.message_re = re.compile(message)
+        self.builder_re = re.compile(builder)
 
     def match(self, test, message, builder):
         """Check if the failure attributes match the issue criteria."""
-        return all((self.test.match(test),
-                    self.message.match(message),
-                    self.builder.match(builder)))
+        return all((self.test_re.match(test),
+                    self.message_re.match(message),
+                    self.builder_re.match(builder)))
 
 
 class MatchIssue(object):
@@ -601,7 +597,7 @@ class MatchIssue(object):
         out = lines.append
 
         for rule in self.rules:
-            out('%s: %s' % (self.number, rule))
+            out('%s: %s:%s:%s' % ((self.number,) + rule))
         indent = ' ' * (len(self.number) + 2)
         for failure, builds in sorted(self.events.items()):
             out(indent + ':'.join(failure) + ' ' +
@@ -1101,8 +1097,8 @@ class JsonOutput(IssueOutput):
         for issue in issues.values():
             rv = {
                 'issue': issue.number,
-                'rules': [dict(zip(('test', 'message', 'builder'), v.rule))
-                          for v in issue.rules],
+                'rules': [{'test': test, 'message': msg, 'builder': builder}
+                          for test, msg, builder in issue.rules],
             }
             # XXX backward compatibility
             rv.update(rv['rules'][0])
