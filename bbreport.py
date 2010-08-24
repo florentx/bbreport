@@ -1101,8 +1101,8 @@ class JsonOutput(IssueOutput):
         for issue in issues.values():
             rv = {
                 'issue': issue.number,
-                'rules': [{'test': test, 'message': msg, 'builder': builder}
-                          for test, msg, builder in issue.rules],
+                'rules': [dict(zip(('test', 'message', 'builder'), v.rule))
+                          for v in issue.rules],
             }
             # XXX backward compatibility
             rv.update(rv['rules'][0])
