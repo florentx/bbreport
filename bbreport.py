@@ -627,8 +627,11 @@ class Issues(dict, MutableMapping):
 
     def __init__(self, *args, **kw):
         self.__keys = []
+        self._preload = []
         self.new_events = {}
         self.update(*args, **kw)
+        # By default do not record
+        self.__record = False
 
     def __setitem__(self, key, value):
         if key in self:
@@ -636,6 +639,9 @@ class Issues(dict, MutableMapping):
         else:
             self.__keys.append(key)
             dict.__setitem__(self, key, MatchIssue(key, value))
+        if self.__record:
+            conn.execute('INSERT INTO rules(issue, test, message, builder) '
+                         'VALUES (?, ?, ?, ?)', [key] + value)
 
     def __iter__(self):
         return iter(self.__keys)
@@ -650,12 +656,46 @@ class Issues(dict, MutableMapping):
         """Return the issues by number of events descending."""
         return sorted(dict.values(self), key=lambda m: -len(m.events))
 
-    def load(self):
+    def clear(self, record=True):
+        del self.__keys[:]
+        self.new_events.clear()
+        dict.clear(self)
+        if conn is not None:
+            # Clear all entries before recording
+            conn.execute('DELETE FROM rules')
+            self.__record = record
+
+    def load(self, offline=False):
         """Populate the issues."""
-        page = urlread(issuesurl)
-        if page:
+        if not offline:
+            page = urlread(issuesurl)
+            if page:
+                # Reset the table
+                self.clear()
+            else:
+                # If page is empty, use cache
+                offline = True
+        if offline:
+            # Load the cache first
+            self._load_from_cache()
+        if self._preload:
+            # Load local configuration
+            for issue, rule in self._preload:
+                self[issue] = rule
+            del self._preload[:]
+        if not offline:
             # Load online issues
             self._load_from_page(u(page))
+
+    def _load_from_cache(self):
+        """Load the issues from the local cache."""
+        if conn is None:
+            return
+        cur = conn.execute('SELECT issue, test, message, builder FROM rules')
+        for row in cur.fetchall():
+            self[row[0]] = row[1:]
+        # Allow recording only if table is empty
+        self.__record = not cur.rowcount
 
     def _load_from_page(self, page):
         """Retrieve the issues from the page."""
@@ -1111,7 +1151,8 @@ def load_database():
     # Initialize or upgrade the tables
     for table in ('builders(builder, host, branch, lastbuild, status)',
                   'builds(builder, build, revision, result, message)',
-                  'failures(builder, build, failed)'):
+                  'failures(builder, build, failed)',
+                  'rules(issue, test, message, builder)'):
         conn.execute('CREATE TABLE IF NOT EXISTS ' + table)
 
 
@@ -1208,10 +1249,10 @@ def configure():
     if 'symbols' in sections:
         SYMBOL.update(conf.items('symbols'))
     if 'issues' in sections:
-        # Load the known issues
+        # Preload the known issues
         for num, val in conf.items('issues'):
             rule = tuple(arg.strip() for arg in val.split(':'))
-            issues[num] = rule
+            issues._preload.append((num, rule))
 
     # Set timeout
     socket.setdefaulttimeout(DEFAULT_TIMEOUT)
@@ -1256,9 +1297,8 @@ def main():
         except Exception:
             conn = None
 
-    if not options.offline:
-        # Load online issues
-        issues.load()
+    # Load issues (online or from cache)
+    issues.load(offline=options.offline)
 
     builders = Builder.query_all()
     if not options.offline:
