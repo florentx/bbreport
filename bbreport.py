@@ -58,6 +58,7 @@ ANSI_COLOR = ['black', 'red', 'green', 'yellow',
               'blue', 'magenta', 'cyan', 'white']
 
 baseurl = 'http://www.python.org/dev/buildbot/'
+issuesurl = 'http://wiki.bbreport.googlecode.com/hg/KnownIssues.wiki'
 
 # Configuration
 basefile = os.path.splitext(__file__)[0]
@@ -649,6 +650,29 @@ class Issues(dict, MutableMapping):
         """Return the issues by number of events descending."""
         return sorted(dict.values(self), key=lambda m: -len(m.events))
 
+    def load(self):
+        """Populate the issues."""
+        page = urlread(issuesurl)
+        if page:
+            # Load online issues
+            self._load_from_page(u(page))
+
+    def _load_from_page(self, page):
+        """Retrieve the issues from the page."""
+        for line in page.splitlines():
+            if not line.startswith('||'):
+                continue
+            # Split table cells
+            cells = line.split('||')[1:-1]
+            if len(cells) < 4:
+                # Skip incomplete rules
+                continue
+            # Strip backquotes
+            rule = [cell.strip(' \t`') for cell in cells]
+            # Skip headers (bold formatted)
+            if rule[0][0] != '*':
+                self[rule[0]] = rule[1:4]
+
     def match(self, build):
         msg = build._message
         builder = build.builder
@@ -1183,15 +1207,17 @@ def configure():
         COLOR.update(conf.items('colors'))
     if 'symbols' in sections:
         SYMBOL.update(conf.items('symbols'))
+    if 'issues' in sections:
+        # Load the known issues
+        for num, val in conf.items('issues'):
+            rule = tuple(arg.strip() for arg in val.split(':'))
+            issues[num] = rule
+
+    # Set timeout
+    socket.setdefaulttimeout(DEFAULT_TIMEOUT)
+
     # Prepare the output colors
     prepare_output()
-    socket.setdefaulttimeout(DEFAULT_TIMEOUT)
-    if 'issues' not in sections:
-        return
-    # Load the known issues
-    for num, val in conf.items('issues'):
-        rule = tuple(arg.strip() for arg in val.split(':'))
-        issues[num] = rule
 
     # Tweak configuration
 
@@ -1229,6 +1255,10 @@ def main():
             load_database()
         except Exception:
             conn = None
+
+    if not options.offline:
+        # Load online issues
+        issues.load()
 
     builders = Builder.query_all()
     if not options.offline:
