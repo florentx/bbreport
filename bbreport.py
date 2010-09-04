@@ -134,7 +134,6 @@ except ImportError:
 try:
     next
 except NameError:
-
     def next(iterator, default=None):
         for item in iterator:
             return item
@@ -143,7 +142,6 @@ except NameError:
 try:
     out = getattr(__builtins__, 'print')
 except AttributeError:
-
     def out(*args, **kw):
         sys.stdout.write(' '.join(str(arg) for arg in args) +
                          kw.get('end', '\n'))
@@ -318,6 +316,9 @@ class Builder(object):
         if row is not None:
             self.saved = True
             (self.lastbuild, self.status) = row
+            if self.status == S_MISSING:
+                # Reset the builder status
+                self.set_status(None)
 
     def add(self, *builds):
         """Add a build to this builder, and adjust lastbuild."""
@@ -637,7 +638,7 @@ class Issues(dict, MutableMapping):
             dict.__setitem__(self, key, MatchIssue(key, value))
         if self.__record:
             conn.execute('INSERT INTO rules(issue, test, message, builder) '
-                         'VALUES (?, ?, ?, ?)', [key] + value)
+                         'VALUES (?, ?, ?, ?)', (key,) + tuple(value))
 
     def __iter__(self):
         return iter(self.__keys)
@@ -1100,8 +1101,6 @@ class JsonOutput(IssueOutput):
                 'rules': [{'test': test, 'message': msg, 'builder': builder}
                           for test, msg, builder in issue.rules],
             }
-            # XXX backward compatibility
-            rv.update(rv['rules'][0])
             if issue.events:
                 rv['failures'] = [format_failure(*f)
                                   for f in sorted(issue.events.items())]
